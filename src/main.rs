@@ -8,7 +8,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+// TODO: #2 Add different arguments to allow closing of sessions <2025-07-08>
 fn main() -> Result<()> {
+    // TODO: #1 Make configurable <2025-07-08>
     let paths: Vec<PathBuf> = vec![
         PathBuf::from("/home/vaengir/personal/Bachelor_Latex/"),
         PathBuf::from("/home/vaengir/vaengir/AwesomeWM/"),
@@ -23,8 +25,10 @@ fn main() -> Result<()> {
         PathBuf::from("/home/vaengir/vaengir/rost_sessionizer/"),
         PathBuf::from("/home/vaengir/vaengir/symbols-outline.nvim//"),
         PathBuf::from("/home/vaengir/vaengir/zig_compiler/"),
+        PathBuf::from("/home/vaengir/vaengir/rigit/"),
     ];
 
+    // TODO: #3 Filter out dirs that have open session <2025-07-08>
     let mut dirs: Dirs = Dirs::new();
     for mut path in paths {
         path = path.canonicalize()?;
@@ -66,7 +70,7 @@ fn main() -> Result<()> {
 
                     dirs.dirs.push(Dir {
                         path: dir.path(),
-                        name: format!("{}/{}", base, worktree),
+                        name: format!("{base}/{worktree}"),
                     });
                 }
             }
@@ -182,7 +186,13 @@ fn main() -> Result<()> {
             .status()
             .context("Error switching back to first window")?;
         Command::new("tmux")
-            .args(["send-keys", "-t", &format!("{}:1", &selected.name), "v"])
+            .args([
+                "send-keys",
+                "-t",
+                &format!("{}:1", &selected.name),
+                "v",
+                "Enter",
+            ])
             .status()
             .context("Error starting Neovim")?;
     }

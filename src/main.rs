@@ -8,9 +8,11 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-// TODO: #2 Add different arguments to allow closing of sessions <2025-07-08>
 // TODO: #4 Clean up code <2025-07-10>
 // TODO: #5 Replace tmux resurrect <2025-07-10>
+/// Module that handles the logic
+pub(crate) mod commands;
+
 fn main() -> Result<()> {
     // TODO: #1 Make configurable <2025-07-08>
     let paths: Vec<PathBuf> = vec![

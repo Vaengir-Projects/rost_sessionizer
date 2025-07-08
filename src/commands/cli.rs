@@ -4,31 +4,28 @@
 //! This module handles the CLI arguments using clap
 
 use clap::{Arg, ArgAction, Command, crate_version, value_parser};
-use clap_complete::{Generator, Shell, generate, generator};
+use clap_complete::{Generator, Shell, generate};
 use std::io;
 
 /// Function to create the CLI structure using clap
 pub(crate) fn build_cli() -> Command {
-    Command::new("rigit")
-        .name("rigit")
+    Command::new("rost_sessionizer")
+        .name("rost_sessionizer")
         .author("Væñgír, <vaengir@gmx.de>")
         .version(crate_version!())
         .about("Cli-tool which integrates with tmux to manage sessions based on project folders. It is intended to work well with git worktrees.")
         .arg_required_else_help(true)
         .subcommand(Command::new("open")
-            .about("Open a new or existing session in tmux")
-            .arg_required_else_help(true)
+            .about("Open a new or switch to an existing session in tmux")
             .arg(Arg::new("verbose")
                 .short('v')
                 .long("verbose")
                 .help("Use verbose output")
                 .action(ArgAction::SetTrue)))
         .subcommand(Command::new("kill")
-            .about("Kill active session")
-            .arg_required_else_help(true)
+            .about("Kill active session"))
         .subcommand(Command::new("kill-all")
-            .about("Kill all active sessions")
-            .arg_required_else_help(true)))
+            .about("Kill all active sessions"))
         .arg(
             Arg::new("generator")
                 .short('G')

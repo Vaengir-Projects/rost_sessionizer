@@ -1,7 +1,13 @@
 [package]
 name = "rost_sessionizer"
-version = "0.1.0"
+authors = ["Væñgír"]
+version = "0.1.0-alpha"
 edition = "2024"
+description = "Cli-tool which integrates with tmux to manage sessions based on project folders. It is intended to work well with git worktrees."
+repository = "https://github.com/Vaengir-Projects/rost_sessionizer.git"
+license = "MIT"
+keywords = ["tmux", "sessionizer"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.98"

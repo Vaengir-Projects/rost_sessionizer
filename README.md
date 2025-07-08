@@ -1,2 +1,2 @@
 # rost_sessionizer
-Small Scripts to manage my tmux sessions
+Cli-tool which integrates with tmux to manage sessions based on project folders. It is intended to work well with git worktrees.

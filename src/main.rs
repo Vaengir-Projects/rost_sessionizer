@@ -3,18 +3,20 @@
 //! Rewritten because I wanted some more advanced features,
 //! like working with *git worktrees*.
 
-use anyhow::{Context, Result};
-use clap_complete::Shell;
-
 use crate::commands::{
     cli::{build_cli, print_completions},
-    open,
+    kill, open,
 };
+use anyhow::{Context, Result};
+use clap_complete::Shell;
 
 // TODO: #4 Clean up code <2025-07-10>
 // TODO: #5 Replace tmux resurrect <2025-07-10>
 /// Module that handles the logic
 pub(crate) mod commands;
+
+// TODO: #1 Make this configurable <2025-07-10>
+pub(crate) const DEFAULT_SESSION: &str = "Default";
 
 fn main() -> Result<()> {
     let args = build_cli().get_matches();
@@ -31,9 +33,10 @@ fn main() -> Result<()> {
             open::open().context("Error while running the open command")?;
         }
         Some(("kill", _sub_matches)) => {
-            todo!();
+            kill::kill_current_session().context("Error while trying to kill current session")?;
         }
         Some(("kill-all", _sub_matches)) => {
+            // TODO: #2 add function to module command::kill <2025-07-10>
             todo!();
         }
         None => println!("Generated bash completion script"),

@@ -1,3 +1,9 @@
-pub(crate) mod cli;
-pub(crate) mod open;
-pub(crate) mod kill;
+//!
+//! # Commands handler
+//!
+//! This module provides the functionality that is used directly in the rost_sessionizer cli
+//! tool.
+
+pub mod cli;
+pub mod kill;
+pub mod open;

@@ -1,24 +1,14 @@
-use crate::DEFAULT_SESSION;
-use anyhow::{Context, Result, anyhow};
+//!
+//! # Kill session handler
+//!
+//! This module handles the logic to kill current or all sessions.
+
+use crate::{DEFAULT_SESSION, utils};
+use anyhow::{Context, Result};
 use std::process::Command;
 
-pub(crate) fn kill_current_session() -> Result<()> {
-    let existing_sessions = Command::new("tmux")
-        .arg("ls")
-        .output()
-        .context("Error listing existing tmux sessions")?
-        .stdout;
-    let existing_sessions = String::from_utf8_lossy(&existing_sessions);
-    let current_session = existing_sessions
-        .lines()
-        .map(|s| s.to_string())
-        .find(|s| s.contains("attached"))
-        .context("No current session available")?;
-
-    let current_session = match current_session.find(':') {
-        Some(i) => &current_session[..i],
-        None => return Err(anyhow!("Error parsing current session name")),
-    };
+pub fn kill_current_session() -> Result<()> {
+    let current_session = utils::current_session().context("Error getting current session")?;
 
     Command::new("tmux")
         .args(["switch-client", "-t", &format!("{DEFAULT_SESSION}:1")])
@@ -27,7 +17,7 @@ pub(crate) fn kill_current_session() -> Result<()> {
 
     if current_session != DEFAULT_SESSION {
         Command::new("tmux")
-            .args(["kill-session", "-t", current_session])
+            .args(["kill-session", "-t", &current_session])
             .status()
             .with_context(|| format!("Error killing current session: '{current_session}'"))?;
     } else {
@@ -43,3 +33,6 @@ pub(crate) fn kill_current_session() -> Result<()> {
     Ok(())
 }
 
+pub fn kill_all_sessions() -> Result<()> {
+    todo!();
+}

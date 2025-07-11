@@ -1,14 +1,14 @@
 //!
 //! # CLI argument handler
 //!
-//! This module handles the CLI arguments using clap
+//! This module handles the CLI arguments using clap.
 
 use clap::{Arg, ArgAction, Command, crate_version, value_parser};
 use clap_complete::{Generator, Shell, generate};
 use std::io;
 
 /// Function to create the CLI structure using clap
-pub(crate) fn build_cli() -> Command {
+pub fn build_cli() -> Command {
     Command::new("rost_sessionizer")
         .name("rost_sessionizer")
         .author("Væñgír, <vaengir@gmx.de>")
@@ -36,7 +36,7 @@ pub(crate) fn build_cli() -> Command {
 }
 
 /// Function to create output for bash completion
-pub(crate) fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
+pub fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
     println!(
         "-----------------------------------------------------------------------------------------------------"
     );

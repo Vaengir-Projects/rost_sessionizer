@@ -1,23 +1,19 @@
-//! Tmux Sessionizer rewritten in Rust.
+//!
+//! # Tmux Sessionizer rewritten in Rust.
+//!
 //! Originally inspired by ThePrimeagen and saccorium.
 //! Rewritten because I wanted some more advanced features,
 //! like working with *git worktrees*.
 
-use crate::commands::{
+use anyhow::{Context, Result};
+use clap_complete::Shell;
+use rost_sessionizer::commands::{
     cli::{build_cli, print_completions},
     kill, open,
 };
-use anyhow::{Context, Result};
-use clap_complete::Shell;
 
 // TODO: #4 Clean up code <2025-07-10>
 // TODO: #5 Replace tmux resurrect <2025-07-10>
-/// Module that handles the logic
-pub(crate) mod commands;
-
-// TODO: #1 Make this configurable <2025-07-10>
-pub(crate) const DEFAULT_SESSION: &str = "Default";
-
 fn main() -> Result<()> {
     let args = build_cli().get_matches();
 
@@ -36,8 +32,7 @@ fn main() -> Result<()> {
             kill::kill_current_session().context("Error while trying to kill current session")?;
         }
         Some(("kill-all", _sub_matches)) => {
-            // TODO: #2 add function to module command::kill <2025-07-10>
-            todo!();
+            kill::kill_all_sessions().context("Error while trying to kill all sessions")?;
         }
         None => println!("Generated bash completion script"),
         e => unreachable!("Should be unreachable!: {:?}", e),

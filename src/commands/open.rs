@@ -1,9 +1,14 @@
+//!
+//! # Open handler
+//!
+//! This module handles the logic to use fzf to create a new or open an existing session.
+
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub(crate) fn open() -> Result<()> {
+pub fn open() -> Result<()> {
     // TODO: #1 Make configurable <2025-07-08>
     let paths: Vec<PathBuf> = vec![
         PathBuf::from("/home/vaengir/personal/Bachelor_Latex/"),

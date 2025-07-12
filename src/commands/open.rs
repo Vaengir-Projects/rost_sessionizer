@@ -28,7 +28,7 @@ pub fn open() -> Result<()> {
         }
     }
 
-    let dirs: Dirs = get_repos().context("Error finding all repos")?;
+    let dirs: Dirs = get_repos(&sorted_existing_sessions).context("Error finding all repos")?;
 
     let mut possible_selections: Dirs = Dirs::new();
     possible_selections
@@ -52,8 +52,7 @@ pub fn open() -> Result<()> {
     Ok(())
 }
 
-// TODO: #3 Filter out dirs that have open session <2025-07-08>
-fn get_repos() -> Result<Dirs> {
+fn get_repos(existing_sessions: &Dirs) -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     for path in PATHS {
         let child_dirs = PathBuf::from(path)
@@ -63,40 +62,54 @@ fn get_repos() -> Result<Dirs> {
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
-                if dir.file_name().eq(".git") {
-                    let mut path = dir.path();
-                    path.pop();
+                match dir
+                    .file_name()
+                    .to_str()
+                    .context("Error converting filename to str")?
+                {
+                    // If subfolder named '.git' exists it is a normal git repo
+                    ".git" => {
+                        let mut path = dir.path();
+                        path.pop();
 
-                    dirs.dirs.push(Dir {
-                        path: Some(path.clone()),
-                        name: path.file_name().unwrap().to_string_lossy().to_string(),
-                    });
-                    break;
-                }
-                let path = PathBuf::from(format!(
-                    "{}/.git",
-                    dir.path()
-                        .to_str()
-                        .context("Error appending `.git` to given path")?
-                ));
-                if path.try_exists()? {
-                    let p = dir.path().clone();
-                    let mut p = p.iter();
-                    let worktree = p
-                        .next_back()
-                        .context("Error getting worktree name")?
-                        .to_string_lossy()
-                        .to_string();
-                    let base = p
-                        .next_back()
-                        .context("Error getting base name")?
-                        .to_string_lossy()
-                        .to_string();
-
-                    dirs.dirs.push(Dir {
-                        path: Some(dir.path()),
-                        name: format!("{base}/{worktree}"),
-                    });
+                        let dir = Dir {
+                            path: Some(path.clone()),
+                            name: path.file_name().unwrap().to_string_lossy().to_string(),
+                        };
+                        if !existing_sessions.dirs.contains(&dir) {
+                            dirs.dirs.push(dir);
+                        }
+                    }
+                    // If not check if subfolder is a git worktree
+                    _ => {
+                        let path = PathBuf::from(format!(
+                            "{}/.git",
+                            dir.path()
+                                .to_str()
+                                .context("Error appending `.git` to given path")?
+                        ));
+                        if path.try_exists()? {
+                            let p = dir.path().clone();
+                            let mut p = p.iter();
+                            let worktree = p
+                                .next_back()
+                                .context("Error getting worktree name")?
+                                .to_string_lossy()
+                                .to_string();
+                            let base = p
+                                .next_back()
+                                .context("Error getting base name")?
+                                .to_string_lossy()
+                                .to_string();
+                            let dir = Dir {
+                                path: Some(dir.path()),
+                                name: format!("{base}/{worktree}"),
+                            };
+                            if !existing_sessions.dirs.contains(&dir) {
+                                dirs.dirs.push(dir);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -200,4 +213,10 @@ impl Dirs {
 struct Dir {
     path: Option<PathBuf>,
     name: String,
+}
+
+impl PartialEq for Dir {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
 }

@@ -6,6 +6,41 @@
 use anyhow::{Context, Result, anyhow};
 use std::process::Command;
 
+pub(crate) fn tmux_command_without_output(args: &[&str]) -> Result<()> {
+    Command::new("tmux")
+        .args(args)
+        .status()
+        .with_context(|| format!("Error running tmux command `tmux {args:#?}"))?;
+
+    Ok(())
+}
+
+pub(crate) fn tmux_switch_client(target_session: &str, target_window: Option<usize>) -> Result<()> {
+    tmux_command_without_output(&[
+        "switch-client",
+        "-t",
+        &format!("{target_session}:{}", target_window.unwrap_or(1)),
+    ])
+    .with_context(|| format!("Error switching tmux client to '{target_session}'"))?;
+
+    Ok(())
+}
+
+pub(crate) fn tmux_kill_session(target_session: &str) -> Result<()> {
+    tmux_command_without_output(&["kill-session", "-t", &target_session])
+        .with_context(|| format!("Error killing session '{target_session}'"))?;
+
+    Ok(())
+}
+
+pub(crate) fn tmux_session_exisits(target_session: &str) -> Result<bool> {
+    Command::new("tmux")
+        .args(["has-session", "-t", target_session])
+        .status()
+        .map(|status| status.success())
+        .context("Error checking if session exists")
+}
+
 pub(crate) fn existing_sessions() -> Result<Vec<String>> {
     let existing_sessions = Command::new("tmux")
         .arg("ls")

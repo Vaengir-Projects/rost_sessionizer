@@ -12,7 +12,6 @@ use rost_sessionizer::commands::{
     kill, open,
 };
 
-// TODO: #4 Clean up code <2025-07-10>
 // TODO: #5 Replace tmux resurrect <2025-07-10>
 fn main() -> Result<()> {
     let args = build_cli().get_matches();

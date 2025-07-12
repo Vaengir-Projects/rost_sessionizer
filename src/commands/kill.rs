@@ -34,5 +34,21 @@ pub fn kill_current_session() -> Result<()> {
 }
 
 pub fn kill_all_sessions() -> Result<()> {
-    todo!();
+    let mut sessions =
+        utils::existing_session_names().context("Error getting existing session names")?;
+    sessions.retain(|s| !s.contains(DEFAULT_SESSION));
+
+    Command::new("tmux")
+        .args(["switch-client", "-t", &format!("{DEFAULT_SESSION}:1")])
+        .status()
+        .context("Error switching to default session")?;
+
+    for session in sessions {
+        Command::new("tmux")
+            .args(["kill-session", "-t", &session])
+            .status()
+            .with_context(|| format!("Error killing current session: '{session}'"))?;
+    }
+
+    Ok(())
 }

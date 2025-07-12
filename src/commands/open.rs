@@ -3,35 +3,18 @@
 //!
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
+use crate::{DEFAULT_SESSION, PATHS, utils};
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 pub fn open() -> Result<()> {
-    // TODO: #1 Make configurable <2025-07-08>
-    let paths: Vec<PathBuf> = vec![
-        PathBuf::from("/home/vaengir/personal/Bachelor_Latex/"),
-        PathBuf::from("/home/vaengir/vaengir/AwesomeWM/"),
-        PathBuf::from("/home/vaengir/vaengir/CLearn/"),
-        PathBuf::from("/home/vaengir/vaengir/Neovim/"),
-        PathBuf::from("/home/vaengir/vaengir/Scripts/"),
-        PathBuf::from("/home/vaengir/vaengir/ZigLearn/"),
-        PathBuf::from("/home/vaengir/vaengir/dotfiles/"),
-        PathBuf::from("/home/vaengir/vaengir/harpoon/"),
-        PathBuf::from("/home/vaengir/vaengir/quicker.nvim//"),
-        PathBuf::from("/home/vaengir/vaengir/rost_interpreter/"),
-        PathBuf::from("/home/vaengir/vaengir/rost_sessionizer/"),
-        PathBuf::from("/home/vaengir/vaengir/symbols-outline.nvim//"),
-        PathBuf::from("/home/vaengir/vaengir/zig_compiler/"),
-        PathBuf::from("/home/vaengir/vaengir/rigit/"),
-    ];
-
     // TODO: #3 Filter out dirs that have open session <2025-07-08>
     let mut dirs: Dirs = Dirs::new();
-    for mut path in paths {
-        path = path.canonicalize()?;
-        let child_dirs = path
+    for path in PATHS {
+        let child_dirs = PathBuf::from(path)
+            .canonicalize()?
             .read_dir()
             .with_context(|| format!("Couldn't get the child directories of {:?}", &path))?;
         for child_dir in child_dirs {
@@ -76,23 +59,17 @@ pub fn open() -> Result<()> {
         }
     }
 
-    let existing_sessions = Command::new("tmux")
-        .arg("ls")
-        .output()
-        .context("Error listing existing tmux sessions")?
-        .stdout;
-    let existing_sessions = String::from_utf8_lossy(&existing_sessions);
-    let existing_sessions: Vec<String> = existing_sessions.lines().map(|s| s.to_string()).collect();
+    let session_names =
+        utils::existing_session_names().context("Error getting existing session names")?;
 
     let mut sorted_existing_sessions: Dirs = Dirs {
         dirs: vec![Dir {
-            name: String::from("Default"),
+            name: String::from(DEFAULT_SESSION),
             path: PathBuf::new(),
         }],
     };
-    for existing_session in existing_sessions {
-        let session_name: &str = existing_session.split(':').collect::<Vec<&str>>()[0];
-        if session_name != "Default" {
+    for session_name in session_names {
+        if session_name != DEFAULT_SESSION {
             sorted_existing_sessions.dirs.push(Dir {
                 name: session_name.to_string(),
                 path: PathBuf::new(),

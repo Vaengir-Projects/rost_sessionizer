@@ -3,13 +3,15 @@
 //!
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
-use crate::{DEFAULT_SESSION, PATHS, utils};
+use crate::{DEFAULT_SESSION, PATHS, commands::cli::GitMode, utils};
 use anyhow::{Context, Result};
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::{
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
-pub fn open() -> Result<()> {
+pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
     let session_names =
         utils::existing_session_names().context("Error getting existing session names")?;
 
@@ -28,7 +30,12 @@ pub fn open() -> Result<()> {
         }
     }
 
-    let dirs: Dirs = get_repos(&sorted_existing_sessions).context("Error finding all repos")?;
+    let dirs: Dirs = match git {
+        true => get_repos(&sorted_existing_sessions).context("Error finding all repos")?,
+        false => {
+            get_directories(&sorted_existing_sessions).context("Error finding all directories")?
+        }
+    };
 
     let mut possible_selections: Dirs = Dirs::new();
     possible_selections
@@ -112,6 +119,22 @@ fn get_repos(existing_sessions: &Dirs) -> Result<Dirs> {
                     }
                 }
             }
+        }
+    }
+
+    Ok(dirs)
+}
+
+fn get_directories(existing_sessions: &Dirs) -> Result<Dirs> {
+    let mut dirs: Dirs = Dirs::new();
+    for path in PATHS {
+        let path = PathBuf::from(path);
+        let dir = Dir {
+            path: Some(path.clone()),
+            name: path.file_name().unwrap().to_string_lossy().to_string(),
+        };
+        if !existing_sessions.dirs.contains(&dir) {
+            dirs.dirs.push(dir);
         }
     }
 

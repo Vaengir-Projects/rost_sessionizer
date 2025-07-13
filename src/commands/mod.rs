@@ -7,3 +7,4 @@
 pub mod cli;
 pub mod kill;
 pub mod open;
+pub mod startup;

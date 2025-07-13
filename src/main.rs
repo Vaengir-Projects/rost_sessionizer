@@ -9,10 +9,9 @@ use anyhow::{Context, Result};
 use clap_complete::Shell;
 use rost_sessionizer::commands::{
     cli::{build_cli, print_completions},
-    kill, open,
+    kill, open, startup,
 };
 
-// TODO: #5 Replace tmux resurrect <2025-07-10>
 fn main() -> Result<()> {
     let args = build_cli().get_matches();
 
@@ -32,6 +31,9 @@ fn main() -> Result<()> {
         }
         Some(("kill-all", _sub_matches)) => {
             kill::kill_all_sessions().context("Error while trying to kill all sessions")?;
+        }
+        Some(("startup", _sub_matches)) => {
+            startup::startup().context("Error while starting default tmux session")?;
         }
         None => println!("Generated bash completion script"),
         e => unreachable!("Should be unreachable!: {:?}", e),

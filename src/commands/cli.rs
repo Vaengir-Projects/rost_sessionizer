@@ -3,7 +3,7 @@
 //!
 //! This module handles the CLI arguments using clap.
 
-use clap::{Arg, ArgAction, Command, crate_version, value_parser};
+use clap::{Arg, ArgAction, Command, ValueEnum, crate_version, value_parser};
 use clap_complete::{Generator, Shell, generate};
 use std::io;
 
@@ -21,6 +21,15 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("open")
                 .about("Open a new or switch to an existing session in tmux")
+                .arg(
+                    Arg::new("git")
+                        .short('g')
+                        .long("git")
+                        .help("Only use configured directories that are git repositories")
+                        .num_args(0..=1)
+                        .action(ArgAction::Set)
+                        .value_parser(value_parser!(GitMode)),
+                )
                 .arg(
                     Arg::new("verbose")
                         .short('v')
@@ -56,4 +65,9 @@ pub fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
         "-----------------------------------------------------------------------------------------------------"
     );
     println!("Copy everything between the lines into the corresponding dir for the shell you use.");
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum GitMode {
+    Worktrees,
 }

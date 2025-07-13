@@ -16,11 +16,10 @@ pub fn kill_current_session() -> Result<()> {
         utils::tmux_kill_session(&current_session)
             .with_context(|| format!("Error killing current session: '{current_session}'"))?;
     } else {
-        utils::tmux_command_without_output(&[
-            "display-message",
-            &format!("Can't kill the default session: '{DEFAULT_SESSION}'"),
-        ])
-        .context("Error sending notification")?;
+        utils::tmux_display_message(&format!(
+            "Can't kill the default session: '{DEFAULT_SESSION}'"
+        ))
+        .context("Error sending 'Can't kill the default session' notification")?;
     }
 
     Ok(())

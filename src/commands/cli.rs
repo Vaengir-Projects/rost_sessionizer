@@ -13,19 +13,25 @@ pub fn build_cli() -> Command {
         .name("rost_sessionizer")
         .author("Væñgír, <vaengir@gmx.de>")
         .version(crate_version!())
-        .about("Cli-tool which integrates with tmux to manage sessions based on project folders. It is intended to work well with git worktrees.")
+        .about(
+            "Cli-tool which integrates with tmux to manage sessions based on project folders.
+            It is intended to work well with git worktrees.",
+        )
         .arg_required_else_help(true)
-        .subcommand(Command::new("open")
-            .about("Open a new or switch to an existing session in tmux")
-            .arg(Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .help("Use verbose output")
-                .action(ArgAction::SetTrue)))
-        .subcommand(Command::new("kill")
-            .about("Kill active session"))
-        .subcommand(Command::new("kill-all")
-            .about("Kill all active sessions"))
+        .subcommand(
+            Command::new("open")
+                .about("Open a new or switch to an existing session in tmux")
+                .arg(
+                    Arg::new("verbose")
+                        .short('v')
+                        .long("verbose")
+                        .help("Use verbose output")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(Command::new("kill").about("Kill active session"))
+        .subcommand(Command::new("kill-all").about("Kill all active sessions"))
+        .subcommand(Command::new("startup").about("Start tmux with the default session"))
         .arg(
             Arg::new("generator")
                 .short('G')

@@ -33,6 +33,10 @@ pub(crate) fn tmux_kill_session(target_session: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
+    tmux_command_without_output(&["display-message", message]).context("Error sending notification")
+}
+
 pub(crate) fn tmux_session_exisits(target_session: &str) -> Result<bool> {
     Command::new("tmux")
         .args(["has-session", "-t", target_session])

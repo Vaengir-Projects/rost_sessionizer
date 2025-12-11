@@ -8,6 +8,7 @@ use clap_complete::{Generator, Shell, generate};
 use std::io;
 
 /// Function to create the CLI structure using clap
+#[must_use]
 pub fn build_cli() -> Command {
     Command::new("rost_sessionizer")
         .name("rost_sessionizer")

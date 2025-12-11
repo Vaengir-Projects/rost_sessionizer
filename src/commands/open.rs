@@ -5,6 +5,7 @@
 
 use crate::{DEFAULT_SESSION, PATHS, commands::cli::GitMode, utils};
 use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::{
     io::Write,
     path::PathBuf,
@@ -12,6 +13,11 @@ use std::{
 };
 
 pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
+/// # Errors
+///
+/// Will return `Err` if the existing sessions can't be found, an error with selecting a value from
+/// the possible selections occurs or any of the tmux operations fail.
+pub fn open(search_mode: &SearchMode) -> Result<()> {
     let session_names =
         utils::existing_session_names().context("Error getting existing session names")?;
 
@@ -45,15 +51,16 @@ pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
 
     let selected =
         select_via_fzf(possible_selections).context("Error selecting new or existing session")?;
+        select_via_fzf(&possible_selections).context("Error selecting new or existing session")?;
 
     let existing_session = utils::tmux_session_exisits(&selected.name)
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
 
-    if !existing_session {
-        create_tmux_session(&selected).context("Error creating new tmux session")?;
-    } else {
+    if existing_session {
         utils::tmux_switch_client(&selected.name, Some(1))
             .context("Error switching to existing session")?;
+    } else {
+        create_tmux_session(&selected).context("Error creating new tmux session")?;
     }
 
     Ok(())
@@ -69,53 +76,38 @@ fn get_repos(existing_sessions: &Dirs) -> Result<Dirs> {
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
-                match dir
+                if let ".git" = dir
                     .file_name()
                     .to_str()
                     .context("Error converting filename to str")?
                 {
-                    // If subfolder named '.git' exists it is a normal git repo
-                    ".git" => {
-                        let mut path = dir.path();
-                        path.pop();
+                    let mut path = dir.path();
+                    path.pop();
 
-                        let dir = Dir {
-                            path: Some(path.clone()),
-                            name: path.file_name().unwrap().to_string_lossy().to_string(),
-                        };
-                        if !existing_sessions.dirs.contains(&dir) {
-                            dirs.dirs.push(dir);
-                        }
-                    }
-                    // If not check if subfolder is a git worktree
-                    _ => {
-                        let path = PathBuf::from(format!(
-                            "{}/.git",
-                            dir.path()
-                                .to_str()
-                                .context("Error appending `.git` to given path")?
-                        ));
-                        if path.try_exists()? {
-                            let p = dir.path().clone();
-                            let mut p = p.iter();
-                            let worktree = p
-                                .next_back()
-                                .context("Error getting worktree name")?
-                                .to_string_lossy()
-                                .to_string();
-                            let base = p
-                                .next_back()
-                                .context("Error getting base name")?
-                                .to_string_lossy()
-                                .to_string();
-                            let dir = Dir {
-                                path: Some(dir.path()),
-                                name: format!("{base}/{worktree}"),
-                            };
-                            if !existing_sessions.dirs.contains(&dir) {
-                                dirs.dirs.push(dir);
-                            }
-                        }
+                    dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
+                        .or_insert(Some(path.clone()));
+                } else {
+                    let path = PathBuf::from(format!(
+                        "{}/.git",
+                        dir.path()
+                            .to_str()
+                            .context("Error appending `.git` to given path")?
+                    ));
+                    if path.try_exists()? {
+                        let p = dir.path().clone();
+                        let mut p = p.iter();
+                        let worktree = p
+                            .next_back()
+                            .context("Error getting worktree name")?
+                            .to_string_lossy()
+                            .to_string();
+                        let base = p
+                            .next_back()
+                            .context("Error getting base name")?
+                            .to_string_lossy()
+                            .to_string();
+                        dirs.entry(format!("{base}/{worktree}"))
+                            .or_insert(Some(dir.path()));
                     }
                 }
             }
@@ -188,7 +180,7 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     Ok(())
 }
 
-fn select_via_fzf(possible_selections: Dirs) -> Result<Dir> {
+fn select_via_fzf(possible_selections: &Dirs) -> Result<Dir> {
     let mut child = Command::new("fzf")
         .args(["--margin=5%", "--padding=2%", "--border", "--ansi"])
         .stdin(Stdio::piped())
@@ -200,9 +192,9 @@ fn select_via_fzf(possible_selections: Dirs) -> Result<Dir> {
     for possibility in &possible_selections.dirs {
         if possibility.path.is_none() {
             // Display already open sessions in bold.
-            writeln!(stdin, "\x1b[1m{}\x1b[0m", possibility.name)?;
+            writeln!(stdin, "\x1b[1m{possible_name}\x1b[0m")?;
         } else {
-            writeln!(stdin, "{}", possibility.name)?;
+            writeln!(stdin, "{possible_name}")?;
         }
     }
 

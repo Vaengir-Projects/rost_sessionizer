@@ -2,6 +2,9 @@ use crate::{DEFAULT_SESSION, utils};
 use anyhow::{Context, Result};
 use std::env;
 
+/// # Errors
+///
+/// Will return `Err` if any of the tmux operations fail.
 pub fn startup() -> Result<()> {
     match env::var("TMUX") {
         Ok(val) if !val.is_empty() => {
@@ -35,7 +38,7 @@ pub fn startup() -> Result<()> {
             ])
             .with_context(|| format!("Error attaching to default session '{DEFAULT_SESSION}'"))?;
         }
-    };
+    }
 
     Ok(())
 }

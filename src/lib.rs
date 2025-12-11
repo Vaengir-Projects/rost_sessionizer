@@ -1,7 +1,7 @@
 //!
 //! # Library backend
 //!
-//! This handles the logic for the cli tool rost_sessionizer.
+//! This handles the logic for the cli tool `rost_sessionizer`.
 
 /// Module that handles the logic
 pub mod commands;

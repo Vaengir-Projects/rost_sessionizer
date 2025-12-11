@@ -1,7 +1,7 @@
 //!
 //! # Tmux Sessionizer rewritten in Rust.
 //!
-//! Originally inspired by ThePrimeagen and saccorium.
+//! Originally inspired by `ThePrimeagen` and `saccorium`.
 //! Rewritten because I wanted some more advanced features,
 //! like working with *git worktrees*.
 

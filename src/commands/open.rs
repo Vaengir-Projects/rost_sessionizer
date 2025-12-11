@@ -4,54 +4,41 @@
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
 use crate::{DEFAULT_SESSION, PATHS, commands::cli::GitMode, utils};
-use anyhow::{Context, Result};
 use anyhow::{Context, Result, anyhow};
 use std::{
+    collections::HashMap,
     io::Write,
     path::PathBuf,
     process::{Command, Stdio},
 };
 
-pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
 /// # Errors
 ///
 /// Will return `Err` if the existing sessions can't be found, an error with selecting a value from
 /// the possible selections occurs or any of the tmux operations fail.
-pub fn open(search_mode: &SearchMode) -> Result<()> {
+pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
     let session_names =
         utils::existing_session_names().context("Error getting existing session names")?;
 
-    let mut sorted_existing_sessions: Dirs = Dirs {
-        dirs: vec![Dir {
-            name: String::from(DEFAULT_SESSION),
-            path: None,
-        }],
-    };
+    let mut possible_selections: Dirs = HashMap::new();
+    possible_selections
+        .entry(DEFAULT_SESSION.to_string())
+        .or_insert(None);
+
     for session_name in session_names {
         if session_name != DEFAULT_SESSION {
-            sorted_existing_sessions.dirs.push(Dir {
-                name: session_name.to_string(),
-                path: None,
-            });
+            possible_selections.entry(session_name).or_insert(None);
         }
     }
 
-    let dirs: Dirs = match git {
-        true => get_repos(&sorted_existing_sessions).context("Error finding all repos")?,
-        false => {
-            get_directories(&sorted_existing_sessions).context("Error finding all directories")?
-        }
-    };
+    if git {
+        possible_selections.try_extend(get_repos().context("Error finding all repos")?);
+    } else {
+        possible_selections.try_extend(get_directories().context("Error finding all directories")?);
+    }
 
-    let mut possible_selections: Dirs = Dirs::new();
-    possible_selections
-        .dirs
-        .extend(sorted_existing_sessions.dirs);
-    possible_selections.dirs.extend(dirs.dirs);
-
-    let selected =
-        select_via_fzf(possible_selections).context("Error selecting new or existing session")?;
-        select_via_fzf(&possible_selections).context("Error selecting new or existing session")?;
+    let selected = select_via_fzf(&possible_selections.sort())
+        .context("Error selecting new or existing session")?;
 
     let existing_session = utils::tmux_session_exisits(&selected.name)
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
@@ -66,13 +53,14 @@ pub fn open(search_mode: &SearchMode) -> Result<()> {
     Ok(())
 }
 
-fn get_repos(existing_sessions: &Dirs) -> Result<Dirs> {
+// TODO: #10 Rename function <2025-09-05>
+fn get_repos() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     for path in PATHS {
         let child_dirs = PathBuf::from(path)
             .canonicalize()?
             .read_dir()
-            .with_context(|| format!("Couldn't get the child directories of {:?}", &path))?;
+            .with_context(|| format!("Couldn't get the child directories of {}", &path))?;
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
@@ -117,17 +105,17 @@ fn get_repos(existing_sessions: &Dirs) -> Result<Dirs> {
     Ok(dirs)
 }
 
-fn get_directories(existing_sessions: &Dirs) -> Result<Dirs> {
+fn get_directories() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     for path in PATHS {
         let path = PathBuf::from(path);
-        let dir = Dir {
-            path: Some(path.clone()),
-            name: path.file_name().unwrap().to_string_lossy().to_string(),
-        };
-        if !existing_sessions.dirs.contains(&dir) {
-            dirs.dirs.push(dir);
-        }
+        dirs.entry(
+            path.file_name()
+                .ok_or(anyhow!("No file_name provided"))?
+                .to_string_lossy()
+                .to_string(),
+        )
+        .or_insert(Some(path.clone()));
     }
 
     Ok(dirs)
@@ -180,7 +168,7 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     Ok(())
 }
 
-fn select_via_fzf(possible_selections: &Dirs) -> Result<Dir> {
+fn select_via_fzf(possible_selections: &Vec<(String, Option<PathBuf>)>) -> Result<Dir> {
     let mut child = Command::new("fzf")
         .args(["--margin=5%", "--padding=2%", "--border", "--ansi"])
         .stdin(Stdio::piped())
@@ -189,8 +177,8 @@ fn select_via_fzf(possible_selections: &Dirs) -> Result<Dir> {
         .context("Failed to spawn fzf")?;
 
     let stdin = child.stdin.as_mut().context("Error opening fzf stdin")?;
-    for possibility in &possible_selections.dirs {
-        if possibility.path.is_none() {
+    for (possible_name, possible_path) in possible_selections {
+        if possible_path.is_none() {
             // Display already open sessions in bold.
             writeln!(stdin, "\x1b[1m{possible_name}\x1b[0m")?;
         } else {
@@ -204,30 +192,61 @@ fn select_via_fzf(possible_selections: &Dirs) -> Result<Dir> {
         .stdout;
     let selected = String::from_utf8_lossy(&selected);
     let selected = selected.trim();
-    let selected = possible_selections
-        .dirs
+    let (selected_name, selected_path) = possible_selections
         .iter()
-        .find(|d| d.name == selected)
+        .find(|(name, _path)| *name == selected)
         .context("Selected value isn't part of provided options")?;
 
-    Ok(selected.clone())
+    Ok(Dir::from((selected_name.clone(), selected_path.clone())))
 }
 
-#[derive(Debug, Clone)]
-struct Dirs {
-    dirs: Vec<Dir>,
+trait HashMapExtend {
+    fn try_extend(&mut self, iter: Self);
+
+    fn sort(&self) -> Vec<(String, Option<PathBuf>)>;
 }
 
-impl Dirs {
-    fn new() -> Self {
-        Dirs { dirs: Vec::new() }
+type Dirs = HashMap<String, Option<PathBuf>>;
+
+impl HashMapExtend for Dirs {
+    fn try_extend(&mut self, iter: Self) {
+        for (k, v) in iter {
+            self.entry(k).or_insert(v);
+        }
+    }
+
+    fn sort(&self) -> Vec<(String, Option<PathBuf>)> {
+        let mut sorted_vec: Vec<(String, Option<PathBuf>)> =
+            self.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        sorted_vec.sort_by(|(ka, va), (kb, vb)| {
+            if ka == DEFAULT_SESSION {
+                return std::cmp::Ordering::Less;
+            }
+            if kb == DEFAULT_SESSION {
+                return std::cmp::Ordering::Greater;
+            }
+
+            match (va, vb) {
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                _ => ka.cmp(kb),
+            }
+        });
+
+        sorted_vec
     }
 }
 
 #[derive(Debug, Clone)]
 struct Dir {
-    path: Option<PathBuf>,
     name: String,
+    path: Option<PathBuf>,
+}
+
+impl From<(String, Option<PathBuf>)> for Dir {
+    fn from((name, path): (String, Option<PathBuf>)) -> Dir {
+        Dir { name, path }
+    }
 }
 
 impl PartialEq for Dir {

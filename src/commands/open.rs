@@ -3,7 +3,7 @@
 //!
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
-use crate::{DEFAULT_SESSION, PATHS, commands::cli::SearchMode, utils};
+use crate::{commands::cli::SearchMode, config, utils};
 use anyhow::{Context, Result};
 use clap::parser::ValuesRef;
 use std::{
@@ -23,11 +23,11 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
 
     let mut possible_selections: Dirs = HashMap::new();
     possible_selections
-        .entry(DEFAULT_SESSION.to_string())
+        .entry(config::default_session())
         .or_insert(None);
 
     for session_name in session_names {
-        if session_name != DEFAULT_SESSION {
+        if session_name != config::default_session() {
             possible_selections.entry(session_name).or_insert(None);
         }
     }
@@ -77,8 +77,7 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
 fn get_directories() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths and parse them.
-    PATHS.iter().try_for_each(|path| {
-        let path = PathBuf::from(path);
+    config::paths().iter().try_for_each(|path| {
         if !path.join(".git").exists() {
             dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
                 .or_insert(Some(path.clone()));
@@ -93,8 +92,7 @@ fn get_directories() -> Result<Dirs> {
 fn get_repos() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are git repositories and parse them.
-    PATHS.iter().try_for_each(|path| {
-        let path = PathBuf::from(path);
+    config::paths().iter().try_for_each(|path| {
         if path.join(".git").exists() {
             dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
                 .or_insert(Some(path.clone()));
@@ -109,11 +107,10 @@ fn get_repos() -> Result<Dirs> {
 fn get_worktrees() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are bare git repositories, find the worktrees and parse them.
-    PATHS.iter().try_for_each(|path| {
-        let child_dirs = PathBuf::from(path)
-            .canonicalize()?
-            .read_dir()
-            .with_context(|| format!("Couldn't get the child directories of {}", &path))?;
+    config::paths().iter().try_for_each(|path| {
+        let child_dirs = path.canonicalize()?.read_dir().with_context(|| {
+            format!("Couldn't get the child directories of {}", &path.display())
+        })?;
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
@@ -253,10 +250,10 @@ impl HashMapExtend for Dirs {
         let mut sorted_vec: Vec<(String, Option<PathBuf>)> =
             self.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         sorted_vec.sort_by(|(ka, va), (kb, vb)| {
-            if ka == DEFAULT_SESSION {
+            if ka == &config::default_session() {
                 return std::cmp::Ordering::Less;
             }
-            if kb == DEFAULT_SESSION {
+            if kb == &config::default_session() {
                 return std::cmp::Ordering::Greater;
             }
 

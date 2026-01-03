@@ -4,7 +4,7 @@
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
 use crate::{DEFAULT_SESSION, PATHS, commands::cli::SearchMode, utils};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use std::{
     collections::HashMap,
     io::Write,
@@ -76,13 +76,10 @@ fn get_directories() -> Result<Dirs> {
     // Iterate over configured paths and parse them.
     PATHS.iter().try_for_each(|path| {
         let path = PathBuf::from(path);
-        dirs.entry(
-            path.file_name()
-                .ok_or(anyhow!("No file_name provided"))?
-                .to_string_lossy()
-                .to_string(),
-        )
-        .or_insert(Some(path.clone()));
+        if !path.join(".git").exists() {
+            dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
+                .or_insert(Some(path.clone()));
+        }
 
         Ok::<_, anyhow::Error>(())
     })?;
@@ -94,23 +91,10 @@ fn get_repos() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are git repositories and parse them.
     PATHS.iter().try_for_each(|path| {
-        let child_dirs = PathBuf::from(path)
-            .canonicalize()?
-            .read_dir()
-            .with_context(|| format!("Couldn't get the child directories of {}", &path))?;
-        for child_dir in child_dirs {
-            let dir = child_dir.context("Child directory has an error")?;
-            if let ".git" = dir
-                .file_name()
-                .to_str()
-                .context("Error converting filename to str")?
-            {
-                let mut path = dir.path();
-                path.pop();
-
-                dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
-                    .or_insert(Some(path.clone()));
-            }
+        let path = PathBuf::from(path);
+        if path.join(".git").exists() {
+            dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
+                .or_insert(Some(path.clone()));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -141,25 +125,20 @@ fn get_worktrees() -> Result<Dirs> {
                     dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
                         .or_insert(Some(path.clone()));
                 } else {
-                    let path = PathBuf::from(format!(
-                        "{}/.git",
-                        dir.path()
-                            .to_str()
-                            .context("Error appending `.git` to given path")?
-                    ));
+                    let path = dir.path().join(".git");
                     if path.try_exists()? {
-                        let p = dir.path().clone();
-                        let mut p = p.iter();
+                        let p = dir.path();
+                        let mut p = p.components().rev();
                         let worktree = p
-                            .next_back()
+                            .next()
                             .context("Error getting worktree name")?
-                            .to_string_lossy()
-                            .to_string();
+                            .as_os_str()
+                            .to_string_lossy();
                         let base = p
-                            .next_back()
+                            .next()
                             .context("Error getting base name")?
-                            .to_string_lossy()
-                            .to_string();
+                            .as_os_str()
+                            .to_string_lossy();
                         dirs.entry(format!("{base}/{worktree}"))
                             .or_insert(Some(dir.path()));
                     }

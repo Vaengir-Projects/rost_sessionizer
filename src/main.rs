@@ -25,7 +25,7 @@ fn main() -> Result<()> {
         Some(("open", sub_matches)) => {
             let _verbose = sub_matches.get_flag("verbose");
             let search_mode = sub_matches
-                .get_one::<SearchMode>("search")
+                .get_many::<SearchMode>("search")
                 .expect("default ensures there is always a value");
             open::open(search_mode).context("Error while running the open command")?;
         }

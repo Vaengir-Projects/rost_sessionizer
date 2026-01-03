@@ -5,6 +5,7 @@
 
 use crate::{DEFAULT_SESSION, PATHS, commands::cli::SearchMode, utils};
 use anyhow::{Context, Result};
+use clap::parser::ValuesRef;
 use std::{
     collections::HashMap,
     io::Write,
@@ -16,7 +17,7 @@ use std::{
 ///
 /// Will return `Err` if the existing sessions can't be found, an error with selecting a value from
 /// the possible selections occurs or any of the tmux operations fail.
-pub fn open(search_mode: &SearchMode) -> Result<()> {
+pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let session_names =
         utils::existing_session_names().context("Error getting existing session names")?;
 
@@ -31,27 +32,29 @@ pub fn open(search_mode: &SearchMode) -> Result<()> {
         }
     }
 
-    match search_mode {
-        SearchMode::All => {
-            // Add all Directories
-            possible_selections
-                .try_extend(get_directories().context("Error finding all directories")?);
+    for search_mode in search_modes {
+        match search_mode {
+            SearchMode::All => {
+                // Add all Directories
+                possible_selections
+                    .try_extend(get_directories().context("Error finding all directories")?);
 
-            // Add all Repos
-            possible_selections.try_extend(get_repos().context("Error finding all repos")?);
+                // Add all Repos
+                possible_selections.try_extend(get_repos().context("Error finding all repos")?);
 
-            // Add all Worktrees
-            possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
-        }
-        SearchMode::Dirs => {
-            possible_selections
-                .try_extend(get_directories().context("Error finding all directories")?);
-        }
-        SearchMode::Repos => {
-            possible_selections.try_extend(get_repos().context("Error finding all repos")?);
-        }
-        SearchMode::Worktrees => {
-            possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+                // Add all Worktrees
+                possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+            }
+            SearchMode::Dirs => {
+                possible_selections
+                    .try_extend(get_directories().context("Error finding all directories")?);
+            }
+            SearchMode::Repos => {
+                possible_selections.try_extend(get_repos().context("Error finding all repos")?);
+            }
+            SearchMode::Worktrees => {
+                possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+            }
         }
     }
 

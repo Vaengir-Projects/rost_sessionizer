@@ -3,7 +3,7 @@
 //!
 //! This module handles the logic to kill current or all sessions.
 
-use crate::{DEFAULT_SESSION, utils};
+use crate::{config, utils};
 use anyhow::{Context, Result};
 
 /// # Errors
@@ -12,12 +12,13 @@ use anyhow::{Context, Result};
 pub fn kill_current_session() -> Result<()> {
     let current_session = utils::current_session().context("Error getting current session")?;
 
-    utils::tmux_switch_client(DEFAULT_SESSION, None)
+    utils::tmux_switch_client(&config::default_session(), None)
         .context("Error switching to default session")?;
 
-    if current_session == DEFAULT_SESSION {
+    if current_session == config::default_session() {
         utils::tmux_display_message(&format!(
-            "Can't kill the default session: '{DEFAULT_SESSION}'"
+            "Can't kill the default session: '{}'",
+            config::default_session()
         ))
         .context("Error sending 'Can't kill the default session' notification")?;
     } else {
@@ -34,9 +35,9 @@ pub fn kill_current_session() -> Result<()> {
 pub fn kill_all_sessions() -> Result<()> {
     let mut sessions =
         utils::existing_session_names().context("Error getting existing session names")?;
-    sessions.retain(|s| !s.contains(DEFAULT_SESSION));
+    sessions.retain(|s| !s.contains(&config::default_session()));
 
-    utils::tmux_switch_client(DEFAULT_SESSION, None)
+    utils::tmux_switch_client(&config::default_session(), None)
         .context("Error switching to default session")?;
 
     for session in sessions {

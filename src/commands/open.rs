@@ -3,7 +3,7 @@
 //!
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
-use crate::{DEFAULT_SESSION, PATHS, commands::cli::GitMode, utils};
+use crate::{DEFAULT_SESSION, PATHS, commands::cli::SearchMode, utils};
 use anyhow::{Context, Result, anyhow};
 use std::{
     collections::HashMap,
@@ -16,7 +16,7 @@ use std::{
 ///
 /// Will return `Err` if the existing sessions can't be found, an error with selecting a value from
 /// the possible selections occurs or any of the tmux operations fail.
-pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
+pub fn open(search_mode: &SearchMode) -> Result<()> {
     let session_names =
         utils::existing_session_names().context("Error getting existing session names")?;
 
@@ -31,10 +31,28 @@ pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
         }
     }
 
-    if git {
-        possible_selections.try_extend(get_repos().context("Error finding all repos")?);
-    } else {
-        possible_selections.try_extend(get_directories().context("Error finding all directories")?);
+    match search_mode {
+        SearchMode::All => {
+            // Add all Directories
+            possible_selections
+                .try_extend(get_directories().context("Error finding all directories")?);
+
+            // Add all Repos
+            possible_selections.try_extend(get_repos().context("Error finding all repos")?);
+
+            // Add all Worktrees
+            possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+        }
+        SearchMode::Dirs => {
+            possible_selections
+                .try_extend(get_directories().context("Error finding all directories")?);
+        }
+        SearchMode::Repos => {
+            possible_selections.try_extend(get_repos().context("Error finding all repos")?);
+        }
+        SearchMode::Worktrees => {
+            possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+        }
     }
 
     let selected = select_via_fzf(&possible_selections.sort())
@@ -53,10 +71,58 @@ pub fn open(git: bool, _git_mode: Option<&GitMode>) -> Result<()> {
     Ok(())
 }
 
-// TODO: #10 Rename function <2025-09-05>
+fn get_directories() -> Result<Dirs> {
+    let mut dirs: Dirs = Dirs::new();
+    // Iterate over configured paths and parse them.
+    PATHS.iter().try_for_each(|path| {
+        let path = PathBuf::from(path);
+        dirs.entry(
+            path.file_name()
+                .ok_or(anyhow!("No file_name provided"))?
+                .to_string_lossy()
+                .to_string(),
+        )
+        .or_insert(Some(path.clone()));
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    Ok(dirs)
+}
+
 fn get_repos() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
-    for path in PATHS {
+    // Iterate over configured paths, check if they are git repositories and parse them.
+    PATHS.iter().try_for_each(|path| {
+        let child_dirs = PathBuf::from(path)
+            .canonicalize()?
+            .read_dir()
+            .with_context(|| format!("Couldn't get the child directories of {}", &path))?;
+        for child_dir in child_dirs {
+            let dir = child_dir.context("Child directory has an error")?;
+            if let ".git" = dir
+                .file_name()
+                .to_str()
+                .context("Error converting filename to str")?
+            {
+                let mut path = dir.path();
+                path.pop();
+
+                dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
+                    .or_insert(Some(path.clone()));
+            }
+        }
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    Ok(dirs)
+}
+
+fn get_worktrees() -> Result<Dirs> {
+    let mut dirs: Dirs = Dirs::new();
+    // Iterate over configured paths, check if they are bare git repositories, find the worktrees and parse them.
+    PATHS.iter().try_for_each(|path| {
         let child_dirs = PathBuf::from(path)
             .canonicalize()?
             .read_dir()
@@ -100,23 +166,9 @@ fn get_repos() -> Result<Dirs> {
                 }
             }
         }
-    }
 
-    Ok(dirs)
-}
-
-fn get_directories() -> Result<Dirs> {
-    let mut dirs: Dirs = Dirs::new();
-    for path in PATHS {
-        let path = PathBuf::from(path);
-        dirs.entry(
-            path.file_name()
-                .ok_or(anyhow!("No file_name provided"))?
-                .to_string_lossy()
-                .to_string(),
-        )
-        .or_insert(Some(path.clone()));
-    }
+        Ok::<_, anyhow::Error>(())
+    })?;
 
     Ok(dirs)
 }

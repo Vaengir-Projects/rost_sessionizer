@@ -23,13 +23,13 @@ pub fn build_cli() -> Command {
             Command::new("open")
                 .about("Open a new or switch to an existing session in tmux")
                 .arg(
-                    Arg::new("git")
-                        .short('g')
-                        .long("git")
-                        .help("Only use configured directories that are git repositories")
-                        .num_args(0..=1)
+                    Arg::new("search")
+                        .short('s')
+                        .long("search")
+                        .help("Configure what should be searchable from the given directories")
                         .action(ArgAction::Set)
-                        .value_parser(value_parser!(GitMode)),
+                        .value_parser(value_parser!(SearchMode))
+                        .default_value("all"),
                 )
                 .arg(
                     Arg::new("verbose")
@@ -69,6 +69,9 @@ pub fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
 }
 
 #[derive(Debug, Clone, ValueEnum)]
-pub enum GitMode {
+pub enum SearchMode {
+    All,
+    Dirs,
+    Repos,
     Worktrees,
 }

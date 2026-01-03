@@ -8,7 +8,7 @@
 use anyhow::{Context, Result};
 use clap_complete::Shell;
 use rost_sessionizer::commands::{
-    cli::{GitMode, build_cli, print_completions},
+    cli::{SearchMode, build_cli, print_completions},
     kill, open, startup,
 };
 
@@ -24,9 +24,10 @@ fn main() -> Result<()> {
     match args.subcommand() {
         Some(("open", sub_matches)) => {
             let _verbose = sub_matches.get_flag("verbose");
-            let git = sub_matches.contains_id("git");
-            let git_mode = sub_matches.get_one::<GitMode>("git");
-            open::open(git, git_mode).context("Error while running the open command")?;
+            let search_mode = sub_matches
+                .get_one::<SearchMode>("search")
+                .expect("default ensures there is always a value");
+            open::open(search_mode).context("Error while running the open command")?;
         }
         Some(("kill", _sub_matches)) => {
             kill::kill_current_session().context("Error while trying to kill current session")?;

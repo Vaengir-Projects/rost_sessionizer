@@ -27,7 +27,7 @@ pub(crate) fn tmux_switch_client(target_session: &str, target_window: Option<usi
 }
 
 pub(crate) fn tmux_kill_session(target_session: &str) -> Result<()> {
-    tmux_command_without_output(&["kill-session", "-t", &target_session])
+    tmux_command_without_output(&["kill-session", "-t", target_session])
         .with_context(|| format!("Error killing session '{target_session}'"))?;
 
     Ok(())
@@ -55,7 +55,7 @@ pub(crate) fn existing_sessions() -> Result<Vec<String>> {
 
     Ok(existing_sessions
         .lines()
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<String>>())
 }
 

@@ -1,6 +1,6 @@
 # Use tatr to track issues and tasks
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 150
 - TAGS: task 0.1.0 documentation
 

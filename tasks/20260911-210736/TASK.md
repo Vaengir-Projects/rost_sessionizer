@@ -1,6 +1,6 @@
 # On startup session named '0' exists
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 140
 - TAGS: bug 0.1.0
 

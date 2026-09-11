@@ -13,10 +13,12 @@ use std::{
     process::{Command, Stdio},
 };
 
+/// Opens the selected session.
+///
 /// # Errors
 ///
-/// Will return `Err` if the existing sessions can't be found, an error with selecting a value from
-/// the possible selections occurs or any of the tmux operations fail.
+/// Returns `io::Error` if any of the tmux commands fail, or
+/// `anyhow::Error` if parsing the existing sessions fails.
 pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let session_names =
         utils::existing_session_names().context("Error getting existing session names")?;
@@ -108,9 +110,10 @@ fn get_worktrees() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are bare git repositories, find the worktrees and parse them.
     config::paths().iter().try_for_each(|path| {
-        let child_dirs = path.canonicalize()?.read_dir().with_context(|| {
-            format!("Couldn't get the child directories of {}", &path.display())
-        })?;
+        let child_dirs = path
+            .canonicalize()?
+            .read_dir()
+            .with_context(|| format!("Couldn't get the child directories of {}", path.display()))?;
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
@@ -166,14 +169,14 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     utils::tmux_command_without_output(&[
         "rename-window",
         "-t",
-        &format!("{}:1", &selected_session.name),
+        &format!("{}:1", selected_session.name),
         "Neovim",
     ])
     .context("Error renaming first window")?;
     utils::tmux_command_without_output(&[
         "new-window",
         "-t",
-        &format!("{}:2", &selected_session.name),
+        &format!("{}:2", selected_session.name),
         "-c",
         &selected_session.path.clone().unwrap().to_string_lossy(),
     ])
@@ -181,7 +184,7 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     utils::tmux_command_without_output(&[
         "rename-window",
         "-t",
-        &format!("{}:2", &selected_session.name),
+        &format!("{}:2", selected_session.name),
         "Bash",
     ])
     .context("Error renaming second window")?;
@@ -190,7 +193,7 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     utils::tmux_command_without_output(&[
         "send-keys",
         "-t",
-        &format!("{}:1", &selected_session.name),
+        &format!("{}:1", selected_session.name),
         "v",
         "Enter",
     ])
@@ -199,6 +202,12 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     Ok(())
 }
 
+/// Allows user to select the session they want to open.
+///
+/// # Errors
+///
+/// Returns `io::Error` if the fzf or any of the tmux commands fail, or
+/// `anyhow::Error` if anything with stdin or stdout fails.
 fn select_via_fzf(possible_selections: &Vec<(String, Option<PathBuf>)>) -> Result<Dir> {
     let mut child = Command::new("fzf")
         .args(["--margin=5%", "--padding=2%", "--border", "--ansi"])

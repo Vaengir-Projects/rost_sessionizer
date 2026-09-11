@@ -1,1 +1,1 @@
-Closed in #13
+Closed in #13.

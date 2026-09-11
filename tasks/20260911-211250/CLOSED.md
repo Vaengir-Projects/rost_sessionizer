@@ -1,1 +1,1 @@
-Closed in #14
+Closed in #14.

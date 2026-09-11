@@ -1,1 +1,1 @@
-Closed in #19
+Closed in #19.

@@ -1,1 +1,1 @@
-Closed in #9
+Closed in #9.

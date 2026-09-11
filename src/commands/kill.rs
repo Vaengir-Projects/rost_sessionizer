@@ -6,9 +6,11 @@
 use crate::{config, utils};
 use anyhow::{Context, Result};
 
+/// Kills the session the user is currently attached to.
+///
 /// # Errors
 ///
-/// Will return `Err` if any of the tmux operations fail.
+/// Returns `io::Error` if any of the tmux commands fail.
 pub fn kill_current_session() -> Result<()> {
     let current_session = utils::current_session().context("Error getting current session")?;
 
@@ -29,9 +31,12 @@ pub fn kill_current_session() -> Result<()> {
     Ok(())
 }
 
+/// Kills all sessions the except the Default session.
+///
 /// # Errors
 ///
-/// Will return `Err` if the existing sessions can't be found or any of the tmux operations fail.
+/// Returns `io::Error` if any of the tmux commands fail, or
+/// `anyhow::Error` if parsing the existing sessions fails.
 pub fn kill_all_sessions() -> Result<()> {
     let mut sessions =
         utils::existing_session_names().context("Error getting existing session names")?;

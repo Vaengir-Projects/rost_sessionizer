@@ -65,6 +65,18 @@ pub fn startup() -> Result<()> {
 }
 
 fn create_default_session() -> Result<()> {
+    let default_session_exists = utils::tmux_session_exisits(&config::default_session())
+        .with_context(|| {
+            format!(
+                "Error checking if default session '{}' exists",
+                config::default_session()
+            )
+        })?;
+    // If default session already exists just exit early
+    if default_session_exists {
+        return Ok(());
+    }
+
     let home = env::var("HOME").context("Error getting $HOME")?;
     utils::tmux_command_without_output(&[
         "new-session",

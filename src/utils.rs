@@ -86,3 +86,22 @@ pub(crate) fn existing_session_names() -> Result<Vec<String>> {
         })
         .collect())
 }
+
+pub(crate) fn get_client_terminal_size() -> Result<(u16, u16)> {
+    let coords = Command::new("tmux")
+        .args(["display-message", "-p", "#{client_width}x#{client_height}"])
+        .output()
+        .context("Error getting client terminal size")?
+        .stdout;
+    let coords = String::from_utf8_lossy(&coords).to_string();
+
+    let (w, h) = coords
+        .trim()
+        .split_once('x')
+        .context("Unexpected format from tmux display-message")?;
+
+    Ok((
+        w.parse().context("Error parsing cols")?,
+        h.parse().context("Error parsing rows")?,
+    ))
+}

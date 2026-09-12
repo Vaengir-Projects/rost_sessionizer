@@ -156,48 +156,40 @@ fn get_worktrees() -> Result<Dirs> {
 }
 
 fn create_tmux_session(selected_session: &Dir) -> Result<()> {
+    let path_str = &selected_session.path.clone().unwrap();
+    let path_str = path_str.to_string_lossy();
+
+    let (cols, rows) =
+        utils::get_client_terminal_size().context("Error getting client terminal size")?;
+
     // Create Session
     utils::tmux_command_without_output(&[
         "new-session",
         "-ds",
         &selected_session.name,
+        "-n",
+        "Neovim",
         "-c",
-        &selected_session.path.clone().unwrap().to_string_lossy(),
+        &path_str,
+        "-x",
+        &cols.to_string(),
+        "-y",
+        &rows.to_string(),
+        "nvim; exec $SHELL",
     ])
     .context("Error creating tmux session")?;
-    // Setup Window Layout
-    utils::tmux_command_without_output(&[
-        "rename-window",
-        "-t",
-        &format!("{}:1", selected_session.name),
-        "Neovim",
-    ])
-    .context("Error renaming first window")?;
     utils::tmux_command_without_output(&[
         "new-window",
         "-t",
         &format!("{}:2", selected_session.name),
+        "-n",
+        "Bash",
         "-c",
-        &selected_session.path.clone().unwrap().to_string_lossy(),
+        &path_str,
     ])
     .context("Error creating second window")?;
-    utils::tmux_command_without_output(&[
-        "rename-window",
-        "-t",
-        &format!("{}:2", selected_session.name),
-        "Bash",
-    ])
-    .context("Error renaming second window")?;
     utils::tmux_switch_client(&selected_session.name, Some(1))
         .context("Error switching back to first window")?;
-    utils::tmux_command_without_output(&[
-        "send-keys",
-        "-t",
-        &format!("{}:1", selected_session.name),
-        "v",
-        "Enter",
-    ])
-    .context("Error starting Neovim")?;
 
     Ok(())
 }

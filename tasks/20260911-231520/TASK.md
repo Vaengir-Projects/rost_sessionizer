@@ -1,6 +1,6 @@
 # Neovim in first window has weird state
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 150
 - TAGS: bug 0.1.0
 

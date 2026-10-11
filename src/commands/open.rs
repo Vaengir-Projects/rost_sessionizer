@@ -3,7 +3,11 @@
 //!
 //! This module handles the logic to use fzf to create a new or open an existing session.
 
-use crate::{commands::cli::SearchMode, config, utils};
+use crate::{
+    commands::cli::SearchMode,
+    config,
+    utils::{self, sanitize_selections},
+};
 use anyhow::{Context, Result};
 use clap::parser::ValuesRef;
 use std::{
@@ -60,7 +64,9 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         }
     }
 
-    let selected = select_via_fzf(&possible_selections.sort())
+    let sanitized_selections = sanitize_selections(possible_selections);
+
+    let selected = select_via_fzf(&sanitized_selections.sort())
         .context("Error selecting new or existing session")?;
 
     let existing_session = utils::tmux_session_exisits(&selected.name)
@@ -238,7 +244,7 @@ trait HashMapExtend {
     fn sort(&self) -> Vec<(String, Option<PathBuf>)>;
 }
 
-type Dirs = HashMap<String, Option<PathBuf>>;
+pub(crate) type Dirs = HashMap<String, Option<PathBuf>>;
 
 impl HashMapExtend for Dirs {
     fn try_extend(&mut self, iter: Self) {

@@ -29,7 +29,7 @@ pub fn build_cli() -> Command {
                         .help("Configure what should be searchable from the given directories")
                         .action(ArgAction::Set)
                         .value_parser(value_parser!(SearchMode))
-                        .num_args(0..=3)
+                        .num_args(0..=4)
                         .default_value("all"),
                 )
                 .arg(
@@ -75,4 +75,5 @@ pub enum SearchMode {
     Dirs,
     Repos,
     Worktrees,
+    Frecency,
 }

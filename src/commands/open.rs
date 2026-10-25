@@ -6,12 +6,13 @@
 use crate::{
     commands::cli::SearchMode,
     config,
+    db::{self},
     utils::{self, sanitize_selections},
 };
 use anyhow::{Context, Result};
 use clap::parser::ValuesRef;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     io::Write,
     path::PathBuf,
     process::{Command, Stdio},
@@ -30,13 +31,18 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let mut possible_selections: Dirs = HashMap::new();
     possible_selections
         .entry(config::default_session())
-        .or_insert(None);
+        .or_insert(Dir::from((config::default_session(), None, None)));
 
     for session_name in session_names {
         if session_name != config::default_session() {
-            possible_selections.entry(session_name).or_insert(None);
+            possible_selections
+                .entry(session_name.clone())
+                .or_insert(Dir::from((session_name, None, None)));
         }
     }
+
+    // Open connection to frecency database
+    let mut conn = db::open().context("Error getting database conntection")?;
 
     for search_mode in search_modes {
         match search_mode {
@@ -50,6 +56,10 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
 
                 // Add all Worktrees
                 possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+
+                // Add all from Frecency db
+                possible_selections
+                    .try_extend(db::scores(&conn).context("Error getting paths by frecency")?);
             }
             SearchMode::Dirs => {
                 possible_selections
@@ -60,6 +70,10 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
             }
             SearchMode::Worktrees => {
                 possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
+            }
+            SearchMode::Frecency => {
+                possible_selections
+                    .try_extend(db::scores(&conn).context("Error getting paths by frecency")?);
             }
         }
     }
@@ -79,6 +93,9 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         create_tmux_session(&selected).context("Error creating new tmux session")?;
     }
 
+    db::bump(&conn, &selected).context("Error updating frecency for selected Dir")?;
+    db::age(&mut conn).context("Error aging frecency database")?;
+
     Ok(())
 }
 
@@ -87,8 +104,9 @@ fn get_directories() -> Result<Dirs> {
     // Iterate over configured paths and parse them.
     config::paths().iter().try_for_each(|path| {
         if !path.join(".git").exists() {
-            dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
-                .or_insert(Some(path.clone()));
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            dirs.entry(name.clone())
+                .or_insert(Dir::from((name, Some(path.clone()), None)));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -102,8 +120,9 @@ fn get_repos() -> Result<Dirs> {
     // Iterate over configured paths, check if they are git repositories and parse them.
     config::paths().iter().try_for_each(|path| {
         if path.join(".git").exists() {
-            dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
-                .or_insert(Some(path.clone()));
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            dirs.entry(name.clone())
+                .or_insert(Dir::from((name, Some(path.clone()), None)));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -131,8 +150,9 @@ fn get_worktrees() -> Result<Dirs> {
                     let mut path = dir.path();
                     path.pop();
 
-                    dirs.entry(path.file_name().unwrap().to_string_lossy().to_string())
-                        .or_insert(Some(path.clone()));
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    dirs.entry(name.clone())
+                        .or_insert(Dir::from((name, Some(path.clone()), None)));
                 } else {
                     let path = dir.path().join(".git");
                     if path.try_exists()? {
@@ -148,8 +168,12 @@ fn get_worktrees() -> Result<Dirs> {
                             .context("Error getting base name")?
                             .as_os_str()
                             .to_string_lossy();
-                        dirs.entry(format!("{base}/{worktree}"))
-                            .or_insert(Some(dir.path()));
+                        let name = format!("{base}/{worktree}");
+                        dirs.entry(name.clone()).or_insert(Dir::from((
+                            name,
+                            Some(dir.path()),
+                            None,
+                        )));
                     }
                 }
             }
@@ -206,17 +230,26 @@ fn create_tmux_session(selected_session: &Dir) -> Result<()> {
 ///
 /// Returns `io::Error` if the fzf or any of the tmux commands fail, or
 /// `anyhow::Error` if anything with stdin or stdout fails.
-fn select_via_fzf(possible_selections: &Vec<(String, Option<PathBuf>)>) -> Result<Dir> {
+fn select_via_fzf(possible_selections: &Vec<(String, Dir)>) -> Result<Dir> {
     let mut child = Command::new("fzf")
-        .args(["--margin=5%", "--padding=2%", "--border", "--ansi"])
+        .args([
+            "--margin=5%",
+            "--padding=2%",
+            "--border",
+            "--ansi",
+            "--tiebreak=index",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .context("Failed to spawn fzf")?;
 
     let stdin = child.stdin.as_mut().context("Error opening fzf stdin")?;
-    for (possible_name, possible_path) in possible_selections {
-        if possible_path.is_none() {
+
+    let existing_session_names =
+        utils::existing_session_names().context("Error getting existing session names")?;
+    for (possible_name, _) in possible_selections {
+        if existing_session_names.contains(possible_name) {
             // Display already open sessions in bold.
             writeln!(stdin, "\x1b[1m{possible_name}\x1b[0m")?;
         } else {
@@ -230,31 +263,40 @@ fn select_via_fzf(possible_selections: &Vec<(String, Option<PathBuf>)>) -> Resul
         .stdout;
     let selected = String::from_utf8_lossy(&selected);
     let selected = selected.trim();
-    let (selected_name, selected_path) = possible_selections
+    let (_, selected_dir) = possible_selections
         .iter()
         .find(|(name, _path)| *name == selected)
         .context("Selected value isn't part of provided options")?;
 
-    Ok(Dir::from((selected_name.clone(), selected_path.clone())))
+    Ok(selected_dir.clone())
 }
 
 trait HashMapExtend {
     fn try_extend(&mut self, iter: Self);
 
-    fn sort(&self) -> Vec<(String, Option<PathBuf>)>;
+    fn sort(&self) -> Vec<(String, Dir)>;
 }
 
-pub(crate) type Dirs = HashMap<String, Option<PathBuf>>;
+pub(crate) type Dirs = HashMap<String, Dir>;
 
 impl HashMapExtend for Dirs {
     fn try_extend(&mut self, iter: Self) {
         for (k, v) in iter {
-            self.entry(k).or_insert(v);
+            match self.entry(k) {
+                Entry::Vacant(e) => {
+                    e.insert(v);
+                }
+                Entry::Occupied(mut e) => {
+                    if e.get().rank.is_none() && v.rank.is_some() {
+                        e.insert(v);
+                    }
+                }
+            }
         }
     }
 
-    fn sort(&self) -> Vec<(String, Option<PathBuf>)> {
-        let mut sorted_vec: Vec<(String, Option<PathBuf>)> =
+    fn sort(&self) -> Vec<(String, Dir)> {
+        let mut sorted_vec: Vec<(String, Dir)> =
             self.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         sorted_vec.sort_by(|(ka, va), (kb, vb)| {
             if ka == &config::default_session() {
@@ -264,10 +306,15 @@ impl HashMapExtend for Dirs {
                 return std::cmp::Ordering::Greater;
             }
 
-            match (va, vb) {
+            match (va.rank, vb.rank) {
                 (None, Some(_)) => std::cmp::Ordering::Less,
                 (Some(_), None) => std::cmp::Ordering::Greater,
-                _ => ka.cmp(kb),
+                (Some(ra), Some(rb)) => rb.total_cmp(&ra),
+                (None, None) => match (va.path.clone(), vb.path.clone()) {
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    _ => ka.cmp(kb),
+                },
             }
         });
 
@@ -276,14 +323,15 @@ impl HashMapExtend for Dirs {
 }
 
 #[derive(Debug, Clone)]
-struct Dir {
-    name: String,
-    path: Option<PathBuf>,
+pub(crate) struct Dir {
+    pub(crate) name: String,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) rank: Option<f64>,
 }
 
-impl From<(String, Option<PathBuf>)> for Dir {
-    fn from((name, path): (String, Option<PathBuf>)) -> Dir {
-        Dir { name, path }
+impl From<(String, Option<PathBuf>, Option<f64>)> for Dir {
+    fn from((name, path, rank): (String, Option<PathBuf>, Option<f64>)) -> Self {
+        Dir { name, path, rank }
     }
 }
 

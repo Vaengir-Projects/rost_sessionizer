@@ -3,11 +3,14 @@
 //!
 //! This handles the logic for the cli tool `rost_sessionizer`.
 
-/// Module that handles the logic
+/// Module that handles the logic.
 pub mod commands;
 
 /// Module that handles the configuration.
 pub mod config;
 
-/// Module that provides internally used functions
+/// Module that provides internally used functions.
 pub mod utils;
+
+// Module that handles the frecency database.
+pub mod db;

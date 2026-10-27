@@ -7,7 +7,7 @@ use crate::{
     commands::cli::SearchMode,
     config,
     db::{self},
-    utils::{self, sanitize_selections},
+    utils::{sanitize_selections, tmux},
 };
 use anyhow::{Context, Result};
 use clap::parser::ValuesRef;
@@ -26,7 +26,7 @@ use std::{
 /// `anyhow::Error` if parsing the existing sessions fails.
 pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let session_names =
-        utils::existing_session_names().context("Error getting existing session names")?;
+        tmux::existing_session_names().context("Error getting existing session names")?;
 
     let mut possible_selections: Dirs = HashMap::new();
     possible_selections
@@ -83,14 +83,14 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let selected = select_via_fzf(&sanitized_selections.sort())
         .context("Error selecting new or existing session")?;
 
-    let existing_session = utils::tmux_session_exisits(&selected.name)
+    let existing_session = tmux::tmux_session_exisits(&selected.name)
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
 
     if existing_session {
-        utils::tmux_switch_client(&selected.name, Some(1))
+        tmux::tmux_switch_client(&selected.name, Some(1))
             .context("Error switching to existing session")?;
     } else {
-        create_tmux_session(&selected).context("Error creating new tmux session")?;
+        tmux::create_tmux_session(&selected).context("Error creating new tmux session")?;
     }
 
     db::bump(&conn, &selected).context("Error updating frecency for selected Dir")?;
@@ -103,10 +103,19 @@ fn get_directories() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths and parse them.
     config::paths().iter().try_for_each(|path| {
-        if !path.join(".git").exists() {
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            dirs.entry(name.clone())
-                .or_insert(Dir::from((name, Some(path.clone()), None)));
+        let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
+
+        if !absolute_path.join(".git").exists() {
+            let name = absolute_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            dirs.entry(name.clone()).or_insert(Dir::from((
+                name,
+                Some(absolute_path.clone()),
+                None,
+            )));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -119,10 +128,19 @@ fn get_repos() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are git repositories and parse them.
     config::paths().iter().try_for_each(|path| {
-        if path.join(".git").exists() {
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            dirs.entry(name.clone())
-                .or_insert(Dir::from((name, Some(path.clone()), None)));
+        let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
+
+        if absolute_path.join(".git").exists() {
+            let name = absolute_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            dirs.entry(name.clone()).or_insert(Dir::from((
+                name,
+                Some(absolute_path.clone()),
+                None,
+            )));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -135,10 +153,14 @@ fn get_worktrees() -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are bare git repositories, find the worktrees and parse them.
     config::paths().iter().try_for_each(|path| {
-        let child_dirs = path
-            .canonicalize()?
-            .read_dir()
-            .with_context(|| format!("Couldn't get the child directories of {}", path.display()))?;
+        let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
+
+        let child_dirs = absolute_path.read_dir().with_context(|| {
+            format!(
+                "Couldn't get the child directories of {}",
+                absolute_path.display()
+            )
+        })?;
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
@@ -151,13 +173,23 @@ fn get_worktrees() -> Result<Dirs> {
                     path.pop();
 
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
-                    dirs.entry(name.clone())
-                        .or_insert(Dir::from((name, Some(path.clone()), None)));
+                    dirs.entry(name.clone()).or_insert(Dir::from((
+                        name,
+                        Some(
+                            path.canonicalize()
+                                .context("Error canonicalizing path")?
+                                .clone(),
+                        ),
+                        None,
+                    )));
                 } else {
                     let path = dir.path().join(".git");
                     if path.try_exists()? {
-                        let p = dir.path();
-                        let mut p = p.components().rev();
+                        let absolute_path = dir
+                            .path()
+                            .canonicalize()
+                            .context("Error canonicalizing path")?;
+                        let mut p = absolute_path.components().rev();
                         let worktree = p
                             .next()
                             .context("Error getting worktree name")?
@@ -171,7 +203,7 @@ fn get_worktrees() -> Result<Dirs> {
                         let name = format!("{base}/{worktree}");
                         dirs.entry(name.clone()).or_insert(Dir::from((
                             name,
-                            Some(dir.path()),
+                            Some(absolute_path),
                             None,
                         )));
                     }
@@ -183,45 +215,6 @@ fn get_worktrees() -> Result<Dirs> {
     })?;
 
     Ok(dirs)
-}
-
-fn create_tmux_session(selected_session: &Dir) -> Result<()> {
-    let path_str = &selected_session.path.clone().unwrap();
-    let path_str = path_str.to_string_lossy();
-
-    let (cols, rows) =
-        utils::get_client_terminal_size().context("Error getting client terminal size")?;
-
-    // Create Session
-    utils::tmux_command_without_output(&[
-        "new-session",
-        "-ds",
-        &selected_session.name,
-        "-n",
-        "Neovim",
-        "-c",
-        &path_str,
-        "-x",
-        &cols.to_string(),
-        "-y",
-        &rows.to_string(),
-        "nvim; exec $SHELL",
-    ])
-    .context("Error creating tmux session")?;
-    utils::tmux_command_without_output(&[
-        "new-window",
-        "-t",
-        &format!("{}:2", selected_session.name),
-        "-n",
-        "Bash",
-        "-c",
-        &path_str,
-    ])
-    .context("Error creating second window")?;
-    utils::tmux_switch_client(&selected_session.name, Some(1))
-        .context("Error switching back to first window")?;
-
-    Ok(())
 }
 
 /// Allows user to select the session they want to open.
@@ -247,7 +240,7 @@ fn select_via_fzf(possible_selections: &Vec<(String, Dir)>) -> Result<Dir> {
     let stdin = child.stdin.as_mut().context("Error opening fzf stdin")?;
 
     let existing_session_names =
-        utils::existing_session_names().context("Error getting existing session names")?;
+        tmux::existing_session_names().context("Error getting existing session names")?;
     for (possible_name, _) in possible_selections {
         if existing_session_names.contains(possible_name) {
             // Display already open sessions in bold.

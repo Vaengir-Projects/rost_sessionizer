@@ -1,4 +1,9 @@
-use crate::{config, utils};
+//!
+//! # Start up handler
+//!
+//! This module handles the logic to start up the default session.
+
+use crate::{config, utils::tmux};
 use anyhow::{Context, Result};
 use std::env;
 
@@ -10,7 +15,7 @@ use std::env;
 pub fn startup() -> Result<()> {
     match env::var("TMUX") {
         Ok(val) if !val.is_empty() => {
-            let default_session_exists = utils::tmux_session_exisits(&config::default_session())
+            let default_session_exists = tmux::tmux_session_exisits(&config::default_session())
                 .with_context(|| {
                     format!(
                         "Error checking if default session '{}' exists",
@@ -18,7 +23,7 @@ pub fn startup() -> Result<()> {
                     )
                 })?;
             if default_session_exists {
-                utils::tmux_display_message(&format!(
+                tmux::tmux_display_message(&format!(
                     "The default session '{}' is already running",
                     config::default_session()
                 ))
@@ -30,7 +35,7 @@ pub fn startup() -> Result<()> {
                         config::default_session()
                     )
                 })?;
-                utils::tmux_switch_client(&config::default_session(), Some(1)).with_context(
+                tmux::tmux_switch_client(&config::default_session(), Some(1)).with_context(
                     || {
                         format!(
                             "Error switching to first window of default session '{}'",
@@ -47,7 +52,7 @@ pub fn startup() -> Result<()> {
                     config::default_session()
                 )
             })?;
-            utils::tmux_command_without_output(&[
+            tmux::tmux_command_without_output(&[
                 "attach-session",
                 "-t",
                 &format!("{}:1", config::default_session()),
@@ -65,7 +70,7 @@ pub fn startup() -> Result<()> {
 }
 
 fn create_default_session() -> Result<()> {
-    let default_session_exists = utils::tmux_session_exisits(&config::default_session())
+    let default_session_exists = tmux::tmux_session_exisits(&config::default_session())
         .with_context(|| {
             format!(
                 "Error checking if default session '{}' exists",
@@ -78,7 +83,7 @@ fn create_default_session() -> Result<()> {
     }
 
     let home = env::var("HOME").context("Error getting $HOME")?;
-    utils::tmux_command_without_output(&[
+    tmux::tmux_command_without_output(&[
         "new-session",
         "-ds",
         &config::default_session(),
@@ -91,7 +96,7 @@ fn create_default_session() -> Result<()> {
             config::default_session()
         )
     })?;
-    utils::tmux_command_without_output(&[
+    tmux::tmux_command_without_output(&[
         "new-window",
         "-t",
         &format!("{}:2", config::default_session()),

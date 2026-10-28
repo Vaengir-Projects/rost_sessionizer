@@ -3,7 +3,7 @@
 //!
 //! This module provides tmux wrapper functions that are used internally.
 
-use crate::commands::open::Dir;
+use crate::{commands::open::Dir, utils};
 use anyhow::{Context, Result, anyhow};
 use std::process::Command;
 
@@ -93,7 +93,7 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     let path_str = path_str.to_string_lossy();
 
     let (cols, rows) =
-        super::get_client_terminal_size().context("Error getting client terminal size")?;
+        utils::get_client_terminal_size().context("Error getting client terminal size")?;
 
     // Create Session
     tmux_command_without_output(&[

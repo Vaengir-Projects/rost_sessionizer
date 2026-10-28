@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use clap_complete::Shell;
 use rost_sessionizer::commands::{
     cli::{SearchMode, build_cli, print_completions},
-    kill, open, startup,
+    frecency, kill, open, startup,
 };
 
 fn main() -> Result<()> {
@@ -37,6 +37,10 @@ fn main() -> Result<()> {
         }
         Some(("startup", _sub_matches)) => {
             startup::startup().context("Error while starting default tmux session")?;
+        }
+        Some(("frecency", sub_matches)) => {
+            frecency::frecency(sub_matches)
+                .context("Error while managing the frecency database")?;
         }
         None => println!("Generated bash completion script"),
         e => unreachable!("Should be unreachable!: {:?}", e),

@@ -5,6 +5,11 @@
 //! tool.
 
 pub mod cli;
+
+pub mod frecency;
+
 pub mod kill;
+
 pub mod open;
+
 pub mod startup;

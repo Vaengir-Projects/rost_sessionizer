@@ -1,9 +1,9 @@
 //!
-//! # Utils section
+//! # Tmux utils section
 //!
-//! This module provides functions that are used internally.
+//! This module provides tmux wrapper functions that are used internally.
 
-use crate::commands::open::Dirs;
+use crate::{commands::open::Dir, utils};
 use anyhow::{Context, Result, anyhow};
 use std::process::Command;
 
@@ -88,34 +88,41 @@ pub(crate) fn existing_session_names() -> Result<Vec<String>> {
         .collect())
 }
 
-pub(crate) fn get_client_terminal_size() -> Result<(u16, u16)> {
-    let coords = Command::new("tmux")
-        .args(["display-message", "-p", "#{client_width}x#{client_height}"])
-        .output()
-        .context("Error getting client terminal size")?
-        .stdout;
-    let coords = String::from_utf8_lossy(&coords).to_string();
+pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
+    let path_str = &selected_session.path.clone().unwrap();
+    let path_str = path_str.to_string_lossy();
 
-    let (w, h) = coords
-        .trim()
-        .split_once('x')
-        .context("Unexpected format from tmux display-message")?;
+    let (cols, rows) =
+        utils::get_client_terminal_size().context("Error getting client terminal size")?;
 
-    Ok((
-        w.parse().context("Error parsing cols")?,
-        h.parse().context("Error parsing rows")?,
-    ))
-}
+    // Create Session
+    tmux_command_without_output(&[
+        "new-session",
+        "-ds",
+        &selected_session.name,
+        "-n",
+        "Neovim",
+        "-c",
+        &path_str,
+        "-x",
+        &cols.to_string(),
+        "-y",
+        &rows.to_string(),
+        "nvim; exec $SHELL",
+    ])
+    .context("Error creating tmux session")?;
+    tmux_command_without_output(&[
+        "new-window",
+        "-t",
+        &format!("{}:2", selected_session.name),
+        "-n",
+        "Bash",
+        "-c",
+        &path_str,
+    ])
+    .context("Error creating second window")?;
+    tmux_switch_client(&selected_session.name, Some(1))
+        .context("Error switching back to first window")?;
 
-pub(crate) fn sanitize_selections(selections: Dirs) -> Dirs {
-    selections
-        .into_iter()
-        .map(|(k, v)| (sanitize_session_name(&k), v))
-        .collect()
-}
-
-pub(crate) fn sanitize_session_name(name: &str) -> String {
-    name.chars()
-        .map(|c| if c == '.' || c == ':' { '_' } else { c })
-        .collect()
+    Ok(())
 }

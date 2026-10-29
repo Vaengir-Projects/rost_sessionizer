@@ -3,9 +3,10 @@
 //!
 //! This module handles the CLI arguments using clap.
 
-use clap::{Arg, ArgAction, Command, ValueEnum, crate_version, value_parser};
+use crate::utils;
+use clap::{Arg, ArgAction, Command, ValueEnum, ValueHint, crate_version, value_parser};
 use clap_complete::{Generator, Shell, generate};
-use std::io;
+use std::{io, path::PathBuf};
 
 /// Function to create the CLI structure using clap
 #[must_use]
@@ -29,7 +30,7 @@ pub fn build_cli() -> Command {
                         .help("Configure what should be searchable from the given directories")
                         .action(ArgAction::Set)
                         .value_parser(value_parser!(SearchMode))
-                        .num_args(0..=3)
+                        .num_args(0..=4)
                         .default_value("all"),
                 )
                 .arg(
@@ -43,6 +44,79 @@ pub fn build_cli() -> Command {
         .subcommand(Command::new("kill").about("Kill active session"))
         .subcommand(Command::new("kill-all").about("Kill all active sessions"))
         .subcommand(Command::new("startup").about("Start tmux with the default session"))
+        .subcommand(
+            Command::new("frecency")
+                .visible_alias("f")
+                .about("Work with the frecency data")
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("new")
+                        .visible_alias("n")
+                        .about("Add a new directory to the frecency database")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("name")
+                                .help("Display name for frecency entry")
+                                .required(true)
+                                .value_parser(utils::validate_name),
+                        )
+                        .arg(
+                            Arg::new("path")
+                                .value_name("path")
+                                .help("Path of the frecency entry")
+                                .required(true)
+                                .value_parser(value_parser!(PathBuf))
+                                .value_hint(ValueHint::DirPath),
+                        ),
+                )
+                .subcommand(
+                    Command::new("add")
+                        .visible_alias("a")
+                        .about("Add the current directory to the frecency database")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("name")
+                                .help("Display name for frecency entry")
+                                .value_parser(utils::validate_name),
+                        ),
+                )
+                .subcommand(
+                    Command::new("modify")
+                        .visible_alias("mod")
+                        .about("Modify an entry from the frecency database")
+                        .arg(
+                            Arg::new("old_name")
+                                .value_name("old_name")
+                                .help("Name of frecency entry to change")
+                                .required(true)
+                                .value_parser(utils::validate_name),
+                        )
+                        .arg(
+                            Arg::new("new_name")
+                                .value_name("new_name")
+                                .help("Name the frecency entry should be changed to")
+                                .required(true)
+                                .value_parser(utils::validate_name),
+                        ),
+                )
+                .subcommand(
+                    Command::new("remove")
+                        .visible_alias("rm")
+                        .about("Remove an entry from the frecency database")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("name")
+                                .help("Display name for frecency entry")
+                                .required(true)
+                                .value_parser(utils::validate_name),
+                        ),
+                )
+                .subcommand(
+                    Command::new("list")
+                        .visible_alias("l")
+                        .about("List directories in frecency database"),
+                ),
+        )
         .arg(
             Arg::new("generator")
                 .short('G')
@@ -75,4 +149,5 @@ pub enum SearchMode {
     Dirs,
     Repos,
     Worktrees,
+    Frecency,
 }

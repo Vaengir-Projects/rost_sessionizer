@@ -3,7 +3,7 @@
 //!
 //! This module handles the CLI arguments using clap.
 
-use anyhow::{Result, bail};
+use crate::utils;
 use clap::{Arg, ArgAction, Command, ValueEnum, ValueHint, crate_version, value_parser};
 use clap_complete::{Generator, Shell, generate};
 use std::{io, path::PathBuf};
@@ -58,7 +58,7 @@ pub fn build_cli() -> Command {
                                 .value_name("name")
                                 .help("Display name for frecency entry")
                                 .required(true)
-                                .value_parser(validate_name),
+                                .value_parser(utils::validate_name),
                         )
                         .arg(
                             Arg::new("path")
@@ -70,6 +70,17 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new("add")
+                        .visible_alias("a")
+                        .about("Add the current directory to the frecency database")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("name")
+                                .help("Display name for frecency entry")
+                                .value_parser(utils::validate_name),
+                        ),
+                )
+                .subcommand(
                     Command::new("modify")
                         .visible_alias("mod")
                         .about("Modify an entry from the frecency database")
@@ -78,14 +89,14 @@ pub fn build_cli() -> Command {
                                 .value_name("old_name")
                                 .help("Name of frecency entry to change")
                                 .required(true)
-                                .value_parser(validate_name),
+                                .value_parser(utils::validate_name),
                         )
                         .arg(
                             Arg::new("new_name")
                                 .value_name("new_name")
                                 .help("Name the frecency entry should be changed to")
                                 .required(true)
-                                .value_parser(validate_name),
+                                .value_parser(utils::validate_name),
                         ),
                 )
                 .subcommand(
@@ -97,7 +108,7 @@ pub fn build_cli() -> Command {
                                 .value_name("name")
                                 .help("Display name for frecency entry")
                                 .required(true)
-                                .value_parser(validate_name),
+                                .value_parser(utils::validate_name),
                         ),
                 )
                 .subcommand(
@@ -113,18 +124,6 @@ pub fn build_cli() -> Command {
                 .action(ArgAction::Set)
                 .value_parser(value_parser!(Shell)),
         )
-}
-
-fn validate_name(name: &str) -> Result<String> {
-    if name.trim().is_empty() {
-        bail!("Error: name must contain at least one non-whitespace character");
-    }
-    // This is a limitation by tmux. See #20260911-210534
-    if name.chars().find(|c| matches!(c, '.' | ':')).is_some() {
-        bail!("Error: name must not contain '.' or ':', use '_' or '_' instead");
-    }
-
-    Ok(name.to_owned())
 }
 
 /// Function to create output for bash completion

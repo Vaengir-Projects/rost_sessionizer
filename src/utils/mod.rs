@@ -4,7 +4,7 @@
 //! This module provides functions that are used internally.
 
 use crate::commands::open::Dirs;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::process::Command;
 
 /// Module that provides internally used tmux wrappers.
@@ -40,4 +40,16 @@ pub(crate) fn sanitize_session_name(name: &str) -> String {
     name.chars()
         .map(|c| if c == '.' || c == ':' { '_' } else { c })
         .collect()
+}
+
+pub(crate) fn validate_name(name: &str) -> Result<String> {
+    if name.trim().is_empty() {
+        bail!("Error: name must contain at least one non-whitespace character");
+    }
+    // This is a limitation by tmux. See #20260911-210534
+    if name.chars().find(|c| matches!(c, '.' | ':')).is_some() {
+        bail!("Error: name must not contain '.' or ':', use '_' or '_' instead");
+    }
+
+    Ok(name.to_owned())
 }

@@ -62,7 +62,7 @@ pub(crate) fn new(conn: &Connection, dir: &Dir) -> Result<()> {
             now()?
         ],
     )
-    .context("Error executing sql statement to bump frecency")?;
+    .context("Error executing sql statement to insert entry into frecency database")?;
 
     Ok(())
 }

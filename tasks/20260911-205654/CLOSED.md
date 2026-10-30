@@ -1,1 +1,1 @@
-Closed in #23
+Closed in #23.

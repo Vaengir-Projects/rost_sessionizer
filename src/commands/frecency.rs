@@ -6,7 +6,7 @@
 use crate::{commands::open::Dir, db, utils};
 use anyhow::{Context, Result};
 use clap::ArgMatches;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Kills the session the user is currently attached to.
 ///
@@ -50,12 +50,23 @@ fn add(sub_matches: &ArgMatches) -> Result<()> {
     let name = if let Some(name) = sub_matches.get_one::<String>("name") {
         name.clone()
     } else {
-        let dir_name = path
+        let path_file_name = path
             .file_name()
             .context("The current directory has no name (is it '/'?), please pass one")?
             .to_string_lossy();
-        utils::validate_name(&utils::sanitize_session_name(&dir_name))
-            .context("Error deriving a name from the current directory")?
+        if sub_matches.get_flag("worktree") {
+            let parent_name = path
+                .parent()
+                .and_then(Path::file_name)
+                .context("The current directory has no parent")?
+                .to_string_lossy();
+            let worktree_name = format!("{parent_name}/{path_file_name}");
+            utils::validate_name(&utils::sanitize_session_name(&worktree_name))
+                .context("Error deriving the worktree name form the current directory")?
+        } else {
+            utils::validate_name(&utils::sanitize_session_name(&path_file_name))
+                .context("Error deriving a name from the current directory")?
+        }
     };
 
     let dir = Dir::from((name, Some(path), None));

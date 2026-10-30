@@ -76,8 +76,17 @@ pub fn build_cli() -> Command {
                         .arg(
                             Arg::new("name")
                                 .value_name("name")
-                                .help("Display name for frecency entry")
-                                .value_parser(utils::validate_name),
+                                .help("Display name for frecency database entry")
+                                .value_parser(utils::validate_name)
+                                .conflicts_with("worktree"),
+                        )
+                        .arg(
+                            Arg::new("worktree")
+                                .short('w')
+                                .long("worktree")
+                                .help("Use the <parent_dir>/<current_dir> as the name for the new frecency database entry")
+                                .action(ArgAction::SetTrue)
+                                .conflicts_with("name"),
                         ),
                 )
                 .subcommand(

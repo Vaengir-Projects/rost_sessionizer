@@ -1,0 +1,5 @@
+# `SESSIONIZER_PATHS` Isn't Validated
+
+- STATUS: OPEN
+- PRIORITY: 150
+- TAGS: bug 0.1.0

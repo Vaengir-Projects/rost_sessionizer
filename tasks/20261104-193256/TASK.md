@@ -1,5 +1,5 @@
 # Tmux Exit Codes Are Never Checked
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 195
 - TAGS: bug 0.1.0

@@ -3,7 +3,10 @@
 //!
 //! This module handles the logic to manage the frecency database.
 
-use crate::{commands::open::Dir, db, utils};
+use crate::{
+    db,
+    utils::types::{dir::Dir, session_name::SessionName},
+};
 use anyhow::{Context, Result};
 use clap::ArgMatches;
 use std::path::{Path, PathBuf};
@@ -26,7 +29,7 @@ pub fn frecency(sub_matches: &ArgMatches) -> Result<()> {
 
 fn new(sub_matches: &ArgMatches) -> Result<()> {
     let name = sub_matches
-        .get_one::<String>("name")
+        .get_one::<SessionName>("name")
         .context("Error getting the name value from the input")?;
     let path = sub_matches
         .get_one::<PathBuf>("path")
@@ -47,7 +50,7 @@ fn add(sub_matches: &ArgMatches) -> Result<()> {
         .context("Error getting current directory")?
         .canonicalize()
         .context("Error canonicalizing the given path")?;
-    let name = if let Some(name) = sub_matches.get_one::<String>("name") {
+    let name = if let Some(name) = sub_matches.get_one::<SessionName>("name") {
         name.clone()
     } else {
         let path_file_name = path
@@ -60,12 +63,9 @@ fn add(sub_matches: &ArgMatches) -> Result<()> {
                 .and_then(Path::file_name)
                 .context("The current directory has no parent")?
                 .to_string_lossy();
-            let worktree_name = format!("{parent_name}/{path_file_name}");
-            utils::validate_name(&utils::sanitize_session_name(&worktree_name))
-                .context("Error deriving the worktree name form the current directory")?
+            SessionName::new(&format!("{parent_name}/{path_file_name}"))
         } else {
-            utils::validate_name(&utils::sanitize_session_name(&path_file_name))
-                .context("Error deriving a name from the current directory")?
+            SessionName::new(&path_file_name)
         }
     };
 
@@ -78,10 +78,10 @@ fn add(sub_matches: &ArgMatches) -> Result<()> {
 
 fn modify(sub_matches: &ArgMatches) -> Result<()> {
     let old_name = sub_matches
-        .get_one::<String>("old_name")
+        .get_one::<SessionName>("old_name")
         .context("Error getting the old_name value from the input")?;
     let new_name = sub_matches
-        .get_one::<String>("new_name")
+        .get_one::<SessionName>("new_name")
         .context("Error getting the new_name value from the input")?;
 
     let conn = db::open().context("Error getting database conntection")?;
@@ -92,13 +92,13 @@ fn modify(sub_matches: &ArgMatches) -> Result<()> {
 
 fn remove(sub_matches: &ArgMatches) -> Result<()> {
     let name = sub_matches
-        .get_one::<String>("name")
+        .get_one::<SessionName>("name")
         .context("Error getting the name value from the input")?;
 
     let conn = db::open().context("Error getting database conntection")?;
 
     db::remove(&conn, name)
-        .with_context(|| format!("Error removing entry: '{name:#?}' from frecency database"))
+        .with_context(|| format!("Error removing entry: '{name}' from frecency database"))
 }
 
 fn list() -> Result<()> {

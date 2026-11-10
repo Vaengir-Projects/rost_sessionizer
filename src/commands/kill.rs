@@ -12,15 +12,15 @@ use anyhow::{Context, Result};
 ///
 /// Returns `io::Error` if any of the tmux commands fail.
 pub fn kill_current_session() -> Result<()> {
+    let default_session = config::default_session();
     let current_session = tmux::current_session().context("Error getting current session")?;
 
-    tmux::tmux_switch_client(&config::default_session(), None)
+    tmux::tmux_switch_client(&default_session, None)
         .context("Error switching to default session")?;
 
-    if current_session == config::default_session() {
+    if current_session == default_session {
         tmux::tmux_display_message(&format!(
-            "Can't kill the default session: '{}'",
-            config::default_session()
+            "Can't kill the default session: '{default_session}'"
         ))
         .context("Error sending 'Can't kill the default session' notification")?;
     } else {
@@ -38,11 +38,12 @@ pub fn kill_current_session() -> Result<()> {
 /// Returns `io::Error` if any of the tmux commands fail, or
 /// `anyhow::Error` if parsing the existing sessions fails.
 pub fn kill_all_sessions() -> Result<()> {
+    let default_session = config::default_session();
     let mut sessions =
         tmux::existing_session_names().context("Error getting existing session names")?;
-    sessions.retain(|s| !s.contains(&config::default_session()));
+    sessions.retain(|s| !s.as_str().contains(default_session.as_str()));
 
-    tmux::tmux_switch_client(&config::default_session(), None)
+    tmux::tmux_switch_client(&default_session, None)
         .context("Error switching to default session")?;
 
     for session in sessions {

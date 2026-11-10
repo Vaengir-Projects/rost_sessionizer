@@ -15,13 +15,19 @@ pub(crate) mod tmux;
 pub(crate) mod types;
 
 pub(crate) fn get_client_terminal_size() -> Result<(u16, u16)> {
-    let coords = Command::new("tmux")
+    let output = Command::new("tmux")
         .args(["display-message", "-p", "#{client_width}x#{client_height}"])
         .output()
-        .context("Error getting client terminal size")?
-        .stdout;
-    let coords = String::from_utf8_lossy(&coords).to_string();
+        .context("Error getting client terminal size")?;
+    if !output.status.success() {
+        bail!(
+            "tmux display-message failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
 
+    let coords = String::from_utf8_lossy(&output.stdout);
     let (w, h) = coords
         .trim()
         .split_once('x')

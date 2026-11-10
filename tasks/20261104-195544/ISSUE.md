@@ -2,10 +2,11 @@
 
 ## Where:
 
-`src/commands/open.rs:27`
+`src/commands/open.rs` (`open`)
 
-Outside tmux, `switch-client` fails (silently, see F2) and `get_client_terminal_size` fails with "Unexpected format
-from tmux display-message". There's no clear message.
+Outside tmux, `open` only fails once a tmux command does: `switch-client` with "no current client", or
+`get_client_terminal_size` with "tmux display-message failed with exit status: 1: no current client". Both happen after
+the fzf selection, and neither says that `open` has to run inside tmux.
 
 # L2: Database Busy Timeout
 
@@ -58,10 +59,13 @@ The flag is parsed into `_verbose` and never used.
 - `frecency()` doc comment says "Kills the session the user is currently attached to." (`commands/frecency.rs:11`)
 - `startup()` doc comment says "Allows user to select the session they want to open." (`commands/startup.rs:10`)
 - Worktree errors say "Error finding all repos" (`commands/open.rs:58`, `:72`).
-- `validate_name` says "use '_' or '_' instead" (`utils/mod.rs:51`).
-- Typos: `tmux_session_exisits`, "conntection" (several places), `now()` context "Error getting" (`db.rs:17`).
-- `tmux_command_without_output`'s error message has an unbalanced backtick and pretty-prints the args across several
-  lines (`utils/tmux.rs:14`).
+- ~~`validate_name` says "use '_' or '_' instead" (`utils/mod.rs:51`).~~ Fixed in #20261104-192731.
+- Typos:
+  - ~~`tmux_session_exisits`~~ Fixed in #20261104-193256.
+  - "conntection" (several places).
+  - `now()` context "Error getting" (`db.rs:17`).
+- ~~`tmux_command_without_output`'s error message has an unbalanced backtick and pretty-prints the args across several
+  lines (`utils/tmux.rs:14`).~~ Fixed in #20261104-193256.
 
 # L8: Duplicated or Wasted Work
 
@@ -69,9 +73,9 @@ The flag is parsed into `_verbose` and never used.
 - In `all` mode, the configured paths are read and canonicalized three times per `open`.
 - The score SQL `CASE` is written twice, in `list` and in `scores` (`db.rs:111-121`, `:291-300`).
 - `existing_session_names()` runs twice per `open` (`commands/open.rs:28`, `:242`).
-- `config::default_session()` runs in every sort comparison, reading an environment variable and allocating a string
-  each time (`commands/open.rs:295`, `:298`).
+- ~~`config::default_session()` runs in every sort comparison, reading an environment variable and allocating a string
+  each time (`commands/open.rs:295`, `:298`).~~ Fixed in #20261104-192731.
 - `get_client_terminal_size` calls tmux directly instead of going through the wrappers in `tmux.rs`
-  (`utils/mod.rs:13-30`).
+  (`utils/mod.rs`, `get_client_terminal_size`).
 - `existing_session_names` does `.context(…).unwrap()`, so the context is pointless and an unexpected line panics
   (`utils/tmux.rs:83-84`).

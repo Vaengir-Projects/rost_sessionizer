@@ -38,3 +38,6 @@ Options:
 ## Installation
 
 ## Configuration
+
+- This should include possible keybinds and quirks with the program working in combination with tmux
+  - For example: using `tmux neww` doesn't show you errors per default.

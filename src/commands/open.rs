@@ -83,7 +83,7 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let selected = select_via_fzf(&possible_selections.sort())
         .context("Error selecting new or existing session")?;
 
-    let existing_session = tmux::tmux_session_exisits(&selected.name)
+    let existing_session = tmux::tmux_session_exists(&selected.name)
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
 
     if existing_session {

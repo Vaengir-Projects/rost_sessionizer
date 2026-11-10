@@ -4,7 +4,7 @@
 //! This module handles the logic to kill current or all sessions.
 
 use crate::{config, utils::tmux};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// Kills the session the user is currently attached to.
 ///
@@ -46,9 +46,18 @@ pub fn kill_all_sessions() -> Result<()> {
     tmux::tmux_switch_client(&default_session, None)
         .context("Error switching to default session")?;
 
+    let mut failed = Vec::new();
     for session in sessions {
-        tmux::tmux_kill_session(&session)
-            .with_context(|| format!("Error killing current session: '{session}'"))?;
+        if let Err(e) = tmux::tmux_kill_session(&session) {
+            failed.push(format!("{e:#}"));
+        }
+    }
+    if !failed.is_empty() {
+        bail!(
+            "Failed to kill {} session(s):\n{}",
+            failed.len(),
+            failed.join("\n")
+        );
     }
 
     Ok(())

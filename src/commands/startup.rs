@@ -19,8 +19,8 @@ pub fn startup() -> Result<()> {
     let default_session = config::default_session();
     match env::var("TMUX") {
         Ok(val) if !val.is_empty() => {
-            let default_session_exists = tmux::tmux_session_exisits(&default_session)
-                .with_context(|| {
+            let default_session_exists =
+                tmux::tmux_session_exists(&default_session).with_context(|| {
                     format!("Error checking if default session '{default_session}' exists")
                 })?;
             if default_session_exists {
@@ -55,7 +55,7 @@ pub fn startup() -> Result<()> {
 }
 
 fn create_default_session(default_session: &SessionName) -> Result<()> {
-    let default_session_exists = tmux::tmux_session_exisits(default_session)
+    let default_session_exists = tmux::tmux_session_exists(default_session)
         .with_context(|| format!("Error checking if default session '{default_session}' exists"))?;
     // If default session already exists just exit early
     if default_session_exists {

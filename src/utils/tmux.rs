@@ -7,14 +7,19 @@ use crate::utils::{
     self,
     types::{dir::Dir, session_name::SessionName},
 };
-use anyhow::{Context, Result, anyhow};
-use std::process::Command;
+use anyhow::{Context, Result, anyhow, bail};
+use std::process::{Command, Stdio};
 
 pub(crate) fn tmux_command_without_output(args: &[&str]) -> Result<()> {
-    Command::new("tmux")
-        .args(args)
+    let mut command = Command::new("tmux");
+    command.args(args);
+    let status = command
         .status()
-        .with_context(|| format!("Error running tmux command `tmux {args:#?}"))?;
+        .with_context(|| format!("Error running {command:?}"))?;
+
+    if !status.success() {
+        bail!("{command:?} failed with {status}");
+    }
 
     Ok(())
 }
@@ -44,26 +49,13 @@ pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
     tmux_command_without_output(&["display-message", message]).context("Error sending notification")
 }
 
-pub(crate) fn tmux_session_exisits(target_session: &SessionName) -> Result<bool> {
+pub(crate) fn tmux_session_exists(target_session: &SessionName) -> Result<bool> {
     Command::new("tmux")
         .args(["has-session", "-t", target_session.as_str()])
+        .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
         .context("Error checking if session exists")
-}
-
-pub(crate) fn existing_sessions() -> Result<Vec<String>> {
-    let existing_sessions = Command::new("tmux")
-        .arg("ls")
-        .output()
-        .context("Error listing existing tmux sessions")?
-        .stdout;
-    let existing_sessions = String::from_utf8_lossy(&existing_sessions).to_string();
-
-    Ok(existing_sessions
-        .lines()
-        .map(ToString::to_string)
-        .collect::<Vec<String>>())
 }
 
 pub(crate) fn current_session() -> Result<SessionName> {
@@ -132,4 +124,20 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
         .context("Error switching back to first window")?;
 
     Ok(())
+}
+
+fn existing_sessions() -> Result<Vec<String>> {
+    // `tmux ls` exits with 1 when no server is running. That just means there are no sessions,
+    // so the exit status is deliberately ignored (stdout is empty then).
+    let existing_sessions = Command::new("tmux")
+        .arg("ls")
+        .output()
+        .context("Error listing existing tmux sessions")?
+        .stdout;
+    let existing_sessions = String::from_utf8_lossy(&existing_sessions).to_string();
+
+    Ok(existing_sessions
+        .lines()
+        .map(ToString::to_string)
+        .collect::<Vec<String>>())
 }

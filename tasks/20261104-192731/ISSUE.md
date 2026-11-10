@@ -16,3 +16,8 @@ the keys, so `dir.name` keeps the raw name.
 - `new-window -t symbols-outline.nvim:2` and `switch-client` then fail, and the failure is ignored (F2).
 - Every later `open` tries to create the session again.
 - `bump` stores the raw name in the DB, and `frecency rm` can't remove it because `validate_name` rejects `.`.
+
+# Fix
+
+Sanitizing the session names has been moved into the creation of `SessionName` objects. This makes sure there is no way
+an unsanitized name is used in a fzf or tmux command, or is added to the frecency database.

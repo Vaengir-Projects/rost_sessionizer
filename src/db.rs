@@ -7,8 +7,11 @@ use std::{
 };
 
 use crate::{
-    commands::open::{Dir, Dirs},
     config,
+    utils::types::{
+        dir::{Dir, Dirs},
+        session_name::SessionName,
+    },
 };
 
 fn now() -> Result<i64> {
@@ -190,10 +193,10 @@ impl Time {
 impl From<i64> for Time {
     fn from(secs: i64) -> Self {
         match secs.abs() {
-            s if s >= 86_400 => Time::Second(s).to_day(),
-            s if s >= 3600 => Time::Second(s).to_hour(),
-            s if s >= 60 => Time::Second(s).to_minute(),
-            _ => Time::Second(secs).to_second(),
+            s if s >= 86_400 => Self::Second(s).to_day(),
+            s if s >= 3600 => Self::Second(s).to_hour(),
+            s if s >= 60 => Self::Second(s).to_minute(),
+            _ => Self::Second(secs).to_second(),
         }
     }
 }
@@ -215,7 +218,11 @@ fn tilde(path: &str, home: Option<&Path>) -> String {
     }
 }
 
-pub(crate) fn modify(conn: &Connection, old_name: &str, new_name: &str) -> Result<()> {
+pub(crate) fn modify(
+    conn: &Connection,
+    old_name: &SessionName,
+    new_name: &SessionName,
+) -> Result<()> {
     let changed = conn
         .execute(
             "UPDATE visits SET name = ?1 WHERE name = ?2",
@@ -237,7 +244,7 @@ pub(crate) fn modify(conn: &Connection, old_name: &str, new_name: &str) -> Resul
     Ok(())
 }
 
-pub(crate) fn remove(conn: &Connection, name: &str) -> Result<()> {
+pub(crate) fn remove(conn: &Connection, name: &SessionName) -> Result<()> {
     conn.execute("DELETE FROM visits WHERE name = ?1", params![name])
         .context("Error executing sql statement to remove entry from the frecency database")?;
 
@@ -285,7 +292,7 @@ pub(crate) fn age(conn: &mut Connection) -> Result<()> {
     tx.commit().context("Error commit the transaction")
 }
 
-/// Returns path -> Dir (with frecency score) for all known folders.
+/// Returns session name -> Dir (with frecency score) for all known folders.
 pub(crate) fn scores(conn: &Connection) -> Result<Dirs> {
     let t = now()?;
     let mut stmt = conn.prepare(
@@ -300,7 +307,7 @@ pub(crate) fn scores(conn: &Connection) -> Result<Dirs> {
     )?;
 
     let rows = stmt.query_map([t], |r| {
-        let name: String = r.get(0)?;
+        let name: SessionName = r.get(0)?;
         let path = PathBuf::from(r.get::<_, String>(1)?);
         let score: f64 = r.get(2)?;
 

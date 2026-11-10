@@ -2,7 +2,7 @@
 
 ## Where:
 
-`src/commands/open.rs:302-305`
+`src/utils/types/dir.rs` (`sort`)
 
 `(None, Some(_)) => Less` puts every entry without a rank before every ranked entry. fzf runs with `--tiebreak=index`,
 so with an empty query the list order is the input order: `Default`, open sessions, every unvisited directory from A to

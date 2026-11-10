@@ -3,7 +3,10 @@
 //!
 //! This module provides tmux wrapper functions that are used internally.
 
-use crate::{commands::open::Dir, utils};
+use crate::utils::{
+    self,
+    types::{dir::Dir, session_name::SessionName},
+};
 use anyhow::{Context, Result, anyhow};
 use std::process::Command;
 
@@ -16,7 +19,10 @@ pub(crate) fn tmux_command_without_output(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn tmux_switch_client(target_session: &str, target_window: Option<usize>) -> Result<()> {
+pub(crate) fn tmux_switch_client(
+    target_session: &SessionName,
+    target_window: Option<usize>,
+) -> Result<()> {
     tmux_command_without_output(&[
         "switch-client",
         "-t",
@@ -27,8 +33,8 @@ pub(crate) fn tmux_switch_client(target_session: &str, target_window: Option<usi
     Ok(())
 }
 
-pub(crate) fn tmux_kill_session(target_session: &str) -> Result<()> {
-    tmux_command_without_output(&["kill-session", "-t", target_session])
+pub(crate) fn tmux_kill_session(target_session: &SessionName) -> Result<()> {
+    tmux_command_without_output(&["kill-session", "-t", target_session.as_str()])
         .with_context(|| format!("Error killing session '{target_session}'"))?;
 
     Ok(())
@@ -38,9 +44,9 @@ pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
     tmux_command_without_output(&["display-message", message]).context("Error sending notification")
 }
 
-pub(crate) fn tmux_session_exisits(target_session: &str) -> Result<bool> {
+pub(crate) fn tmux_session_exisits(target_session: &SessionName) -> Result<bool> {
     Command::new("tmux")
-        .args(["has-session", "-t", target_session])
+        .args(["has-session", "-t", target_session.as_str()])
         .status()
         .map(|status| status.success())
         .context("Error checking if session exists")
@@ -60,7 +66,7 @@ pub(crate) fn existing_sessions() -> Result<Vec<String>> {
         .collect::<Vec<String>>())
 }
 
-pub(crate) fn current_session() -> Result<String> {
+pub(crate) fn current_session() -> Result<SessionName> {
     let existing_sessions = existing_sessions().context("Error getting existing sessions")?;
     let current_session = existing_sessions
         .iter()
@@ -68,22 +74,23 @@ pub(crate) fn current_session() -> Result<String> {
         .context("No current session available")?;
 
     match current_session.find(':') {
-        Some(i) => Ok(current_session[..i].to_string()),
+        Some(i) => Ok(SessionName::new(&current_session[..i])),
         None => Err(anyhow!("Error parsing current session name")),
     }
 }
 
-pub(crate) fn existing_session_names() -> Result<Vec<String>> {
+pub(crate) fn existing_session_names() -> Result<Vec<SessionName>> {
     let existing_sessions = existing_sessions().context("Error getting existing sessions")?;
 
     Ok(existing_sessions
         .iter()
         .map(|s| {
-            s.split_once(':')
-                .context("Error parsing session names")
-                .unwrap()
-                .0
-                .to_string()
+            SessionName::new(
+                s.split_once(':')
+                    .context("Error parsing session names")
+                    .unwrap()
+                    .0,
+            )
         })
         .collect())
 }
@@ -99,7 +106,7 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     tmux_command_without_output(&[
         "new-session",
         "-ds",
-        &selected_session.name,
+        selected_session.name.as_str(),
         "-n",
         "Neovim",
         "-c",

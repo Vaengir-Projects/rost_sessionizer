@@ -1,10 +1,10 @@
+use crate::utils::types::session_name::SessionName;
 use std::{env, path::PathBuf};
 
-pub(crate) fn default_session() -> String {
-    match env::var_os("DEFAULT_SESSION") {
-        Some(default_session) => default_session.to_str().unwrap_or("Default").to_string(),
-        None => "Default".to_string(),
-    }
+pub(crate) fn default_session() -> SessionName {
+    let raw = env::var("DEFAULT_SESSION").unwrap_or_else(|_| "Default".to_string());
+
+    SessionName::new(&raw)
 }
 
 pub(crate) fn paths() -> Vec<PathBuf> {

@@ -7,14 +7,19 @@ use crate::{
     commands::cli::SearchMode,
     config,
     db::{self},
-    utils::{sanitize_selections, tmux},
+    utils::{
+        tmux,
+        types::{
+            dir::{Dir, Dirs, HashMapExtend as _},
+            session_name::SessionName,
+        },
+    },
 };
 use anyhow::{Context, Result};
 use clap::parser::ValuesRef;
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::HashMap,
     io::Write,
-    path::PathBuf,
     process::{Command, Stdio},
 };
 
@@ -25,19 +30,16 @@ use std::{
 /// Returns `io::Error` if any of the tmux commands fail, or
 /// `anyhow::Error` if parsing the existing sessions fails.
 pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
+    let default_session = config::default_session();
     let session_names =
         tmux::existing_session_names().context("Error getting existing session names")?;
 
     let mut possible_selections: Dirs = HashMap::new();
-    possible_selections
-        .entry(config::default_session())
-        .or_insert(Dir::from((config::default_session(), None, None)));
+    possible_selections.try_insert_dir(Dir::from((default_session.clone(), None, None)));
 
     for session_name in session_names {
-        if session_name != config::default_session() {
-            possible_selections
-                .entry(session_name.clone())
-                .or_insert(Dir::from((session_name, None, None)));
+        if session_name != default_session {
+            possible_selections.try_insert_dir(Dir::from((session_name, None, None)));
         }
     }
 
@@ -78,9 +80,7 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         }
     }
 
-    let sanitized_selections = sanitize_selections(possible_selections);
-
-    let selected = select_via_fzf(&sanitized_selections.sort())
+    let selected = select_via_fzf(&possible_selections.sort())
         .context("Error selecting new or existing session")?;
 
     let existing_session = tmux::tmux_session_exisits(&selected.name)
@@ -111,8 +111,8 @@ fn get_directories() -> Result<Dirs> {
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
-            dirs.entry(name.clone()).or_insert(Dir::from((
-                name,
+            dirs.try_insert_dir(Dir::from((
+                SessionName::new(&name),
                 Some(absolute_path.clone()),
                 None,
             )));
@@ -136,8 +136,8 @@ fn get_repos() -> Result<Dirs> {
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
-            dirs.entry(name.clone()).or_insert(Dir::from((
-                name,
+            dirs.try_insert_dir(Dir::from((
+                SessionName::new(&name),
                 Some(absolute_path.clone()),
                 None,
             )));
@@ -173,8 +173,8 @@ fn get_worktrees() -> Result<Dirs> {
                     path.pop();
 
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
-                    dirs.entry(name.clone()).or_insert(Dir::from((
-                        name,
+                    dirs.try_insert_dir(Dir::from((
+                        SessionName::new(&name),
                         Some(
                             path.canonicalize()
                                 .context("Error canonicalizing path")?
@@ -201,8 +201,8 @@ fn get_worktrees() -> Result<Dirs> {
                             .as_os_str()
                             .to_string_lossy();
                         let name = format!("{base}/{worktree}");
-                        dirs.entry(name.clone()).or_insert(Dir::from((
-                            name,
+                        dirs.try_insert_dir(Dir::from((
+                            SessionName::new(&name),
                             Some(absolute_path),
                             None,
                         )));
@@ -223,7 +223,7 @@ fn get_worktrees() -> Result<Dirs> {
 ///
 /// Returns `io::Error` if the fzf or any of the tmux commands fail, or
 /// `anyhow::Error` if anything with stdin or stdout fails.
-fn select_via_fzf(possible_selections: &Vec<(String, Dir)>) -> Result<Dir> {
+fn select_via_fzf(possible_selections: &[Dir]) -> Result<Dir> {
     let mut child = Command::new("fzf")
         .args([
             "--margin=5%",
@@ -241,12 +241,13 @@ fn select_via_fzf(possible_selections: &Vec<(String, Dir)>) -> Result<Dir> {
 
     let existing_session_names =
         tmux::existing_session_names().context("Error getting existing session names")?;
-    for (possible_name, _) in possible_selections {
-        if existing_session_names.contains(possible_name) {
+    for dir in possible_selections {
+        let name = &dir.name;
+        if existing_session_names.contains(name) {
             // Display already open sessions in bold.
-            writeln!(stdin, "\x1b[1m{possible_name}\x1b[0m")?;
+            writeln!(stdin, "\x1b[1m{name}\x1b[0m")?;
         } else {
-            writeln!(stdin, "{possible_name}")?;
+            writeln!(stdin, "{name}")?;
         }
     }
 
@@ -256,80 +257,9 @@ fn select_via_fzf(possible_selections: &Vec<(String, Dir)>) -> Result<Dir> {
         .stdout;
     let selected = String::from_utf8_lossy(&selected);
     let selected = selected.trim();
-    let (_, selected_dir) = possible_selections
+    possible_selections
         .iter()
-        .find(|(name, _path)| *name == selected)
-        .context("Selected value isn't part of provided options")?;
-
-    Ok(selected_dir.clone())
-}
-
-trait HashMapExtend {
-    fn try_extend(&mut self, iter: Self);
-
-    fn sort(&self) -> Vec<(String, Dir)>;
-}
-
-pub(crate) type Dirs = HashMap<String, Dir>;
-
-impl HashMapExtend for Dirs {
-    fn try_extend(&mut self, iter: Self) {
-        for (k, v) in iter {
-            match self.entry(k) {
-                Entry::Vacant(e) => {
-                    e.insert(v);
-                }
-                Entry::Occupied(mut e) => {
-                    if e.get().rank.is_none() && v.rank.is_some() {
-                        e.insert(v);
-                    }
-                }
-            }
-        }
-    }
-
-    fn sort(&self) -> Vec<(String, Dir)> {
-        let mut sorted_vec: Vec<(String, Dir)> =
-            self.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        sorted_vec.sort_by(|(ka, va), (kb, vb)| {
-            if ka == &config::default_session() {
-                return std::cmp::Ordering::Less;
-            }
-            if kb == &config::default_session() {
-                return std::cmp::Ordering::Greater;
-            }
-
-            match (va.rank, vb.rank) {
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (Some(ra), Some(rb)) => rb.total_cmp(&ra),
-                (None, None) => match (va.path.clone(), vb.path.clone()) {
-                    (None, Some(_)) => std::cmp::Ordering::Less,
-                    (Some(_), None) => std::cmp::Ordering::Greater,
-                    _ => ka.cmp(kb),
-                },
-            }
-        });
-
-        sorted_vec
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Dir {
-    pub(crate) name: String,
-    pub(crate) path: Option<PathBuf>,
-    pub(crate) rank: Option<f64>,
-}
-
-impl From<(String, Option<PathBuf>, Option<f64>)> for Dir {
-    fn from((name, path, rank): (String, Option<PathBuf>, Option<f64>)) -> Self {
-        Dir { name, path, rank }
-    }
-}
-
-impl PartialEq for Dir {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
+        .find(|dir| dir.name.as_str() == selected)
+        .cloned()
+        .context("Selected value isn't part of provided options")
 }

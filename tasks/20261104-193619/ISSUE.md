@@ -2,7 +2,7 @@
 
 ## Where:
 
-`src/utils/tmux.rs:63-74`
+`src/utils/tmux.rs` (`current_session`, `existing_sessions`)
 
 `current_session` returns the first line of `tmux ls` that contains "attached". That is the alphabetically first
 session with *any* client attached, not the session of the client that ran the command. A session whose name contains

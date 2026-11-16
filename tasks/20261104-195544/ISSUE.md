@@ -4,9 +4,10 @@
 
 `src/commands/open.rs` (`open`)
 
-Outside tmux, `open` only fails once a tmux command does: `switch-client` with "no current client", or
-`get_client_terminal_size` with "tmux display-message failed with exit status: 1: no current client". Both happen after
-the fzf selection, and neither says that `open` has to run inside tmux.
+Outside tmux, `open` doesn't fail with a clear message. Without a server it stops right away at `list-sessions`. With a
+server running it only fails after the fzf selection: `display-message` has no client there, so `client_terminal_size`
+(`src/utils/tmux.rs`) get `x` and fails with "Error parsing cols". None of these errors say `open` has to run inside
+tmux.
 
 # L2: Database Busy Timeout
 
@@ -75,7 +76,7 @@ The flag is parsed into `_verbose` and never used.
 - `existing_session_names()` runs twice per `open` (`commands/open.rs:28`, `:242`).
 - ~~`config::default_session()` runs in every sort comparison, reading an environment variable and allocating a string
   each time (`commands/open.rs:295`, `:298`).~~ Fixed in #20261104-192731.
-- `get_client_terminal_size` calls tmux directly instead of going through the wrappers in `tmux.rs`
-  (`utils/mod.rs`, `get_client_terminal_size`).
-- `existing_session_names` does `.context(…).unwrap()`, so the context is pointless and an unexpected line panics
-  (`utils/tmux.rs:83-84`).
+- ~~`get_client_terminal_size` calls tmux directly instead of going through the wrappers in `tmux.rs`
+  (`utils/mod.rs`, `get_client_terminal_size`).~~
+- ~~`existing_session_names` does `.context(…).unwrap()`, so the context is pointless and an unexpected line panics
+  (`utils/tmux.rs:83-84`).~~

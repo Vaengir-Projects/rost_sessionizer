@@ -1,17 +1,16 @@
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, ErrorCode, params};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
-
 use crate::{
     config,
     utils::types::{
         dir::{Dir, Dirs},
         session_name::SessionName,
     },
+};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, ErrorCode, params};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 fn now() -> Result<i64> {

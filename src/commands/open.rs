@@ -31,16 +31,16 @@ use std::{
 /// `anyhow::Error` if parsing the existing sessions fails.
 pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let default_session = config::default_session();
-    let session_names =
-        tmux::existing_session_names().context("Error getting existing session names")?;
 
     let mut possible_selections: Dirs = HashMap::new();
 
-    for session_name in session_names {
-        possible_selections.try_insert_dir(Dir::session(session_name));
+    for session in tmux::existing_sessions().context("Error getting existing sessions")? {
+        possible_selections.try_insert_dir(session);
     }
+
+    let home = dirs::home_dir().context("Couldn't determine the home directory")?;
     // Keep the default session selectable even when it isn't running.
-    possible_selections.try_insert_dir(Dir::from((default_session, None, None)));
+    possible_selections.try_insert_dir(Dir::from((default_session, home, None)));
 
     // Open connection to frecency database
     let mut conn = db::open().context("Error getting database conntection")?;
@@ -113,11 +113,7 @@ fn get_directories() -> Result<Dirs> {
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
-            dirs.try_insert_dir(Dir::from((
-                SessionName::new(&name),
-                Some(absolute_path.clone()),
-                None,
-            )));
+            dirs.try_insert_dir(Dir::from((SessionName::new(&name), absolute_path, None)));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -138,11 +134,7 @@ fn get_repos() -> Result<Dirs> {
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
-            dirs.try_insert_dir(Dir::from((
-                SessionName::new(&name),
-                Some(absolute_path.clone()),
-                None,
-            )));
+            dirs.try_insert_dir(Dir::from((SessionName::new(&name), absolute_path, None)));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -177,11 +169,7 @@ fn get_worktrees() -> Result<Dirs> {
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
                     dirs.try_insert_dir(Dir::from((
                         SessionName::new(&name),
-                        Some(
-                            path.canonicalize()
-                                .context("Error canonicalizing path")?
-                                .clone(),
-                        ),
+                        path.canonicalize().context("Error canonicalizing path")?,
                         None,
                     )));
                 } else {
@@ -205,7 +193,7 @@ fn get_worktrees() -> Result<Dirs> {
                         let name = format!("{base}/{worktree}");
                         dirs.try_insert_dir(Dir::from((
                             SessionName::new(&name),
-                            Some(absolute_path),
+                            absolute_path,
                             None,
                         )));
                     }

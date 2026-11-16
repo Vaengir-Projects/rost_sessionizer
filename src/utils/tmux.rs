@@ -7,6 +7,7 @@ use crate::utils::types::{dir::Dir, session_name::SessionName};
 use anyhow::{Context, Result, bail};
 use std::{
     env,
+    path::PathBuf,
     process::{Command, Stdio},
 };
 
@@ -100,10 +101,24 @@ pub(crate) fn existing_session_names() -> Result<Vec<SessionName>> {
     Ok(output.lines().map(SessionName::new).collect())
 }
 
-pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
-    let path_str = &selected_session.path.clone().unwrap();
-    let path_str = path_str.to_string_lossy();
+pub(crate) fn existing_sessions() -> Result<Vec<Dir>> {
+    let output =
+        tmux_command_with_output(&["list-sessions", "-F", "#{session_name}:#{session_path}"])
+            .context("Error listing existing tmux sessions")?;
 
+    output
+        .lines()
+        .map(|line| {
+            let (name, path) = line
+                .split_once(':')
+                .with_context(|| format!("Unexpected line from tmux list-sessions: '{line}'"))?;
+            Ok(Dir::session(SessionName::new(name), PathBuf::from(path)))
+        })
+        .collect()
+}
+
+pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
+    let path_str = selected_session.path.to_string_lossy();
     let (cols, rows) = client_terminal_size().context("Error getting client terminal size")?;
 
     // Create Session

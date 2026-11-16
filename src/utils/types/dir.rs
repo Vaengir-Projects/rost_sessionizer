@@ -12,24 +12,24 @@ use std::{
 #[derive(Debug, Clone)]
 pub(crate) struct Dir {
     pub(crate) name: SessionName,
-    pub(crate) path: Option<PathBuf>,
+    pub(crate) path: PathBuf,
     pub(crate) rank: Option<f64>,
     pub(crate) has_session: bool,
 }
 
 impl Dir {
-    pub(crate) fn session(name: SessionName) -> Self {
+    pub(crate) fn session(name: SessionName, path: PathBuf) -> Self {
         Self {
             name,
-            path: None,
+            path,
             rank: None,
             has_session: true,
         }
     }
 }
 
-impl From<(SessionName, Option<PathBuf>, Option<f64>)> for Dir {
-    fn from((name, path, rank): (SessionName, Option<PathBuf>, Option<f64>)) -> Self {
+impl From<(SessionName, PathBuf, Option<f64>)> for Dir {
+    fn from((name, path, rank): (SessionName, PathBuf, Option<f64>)) -> Self {
         Self {
             name,
             path,

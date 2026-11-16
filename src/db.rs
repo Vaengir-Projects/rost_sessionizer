@@ -55,14 +55,7 @@ pub(crate) fn open() -> Result<Connection> {
 pub(crate) fn new(conn: &Connection, dir: &Dir) -> Result<()> {
     conn.execute(
         "INSERT INTO visits (name, path, rank, last_accessed) VALUES (?1, ?2, 0, ?3)",
-        params![
-            &dir.name,
-            &dir.path
-                .clone()
-                .context("Error because selection doesn't have a path")?
-                .to_str(),
-            now()?
-        ],
+        params![&dir.name, &dir.path.to_str(), now()?],
     )
     .context("Error executing sql statement to insert entry into frecency database")?;
 
@@ -258,14 +251,7 @@ pub(crate) fn bump(conn: &Connection, dir: &Dir) -> Result<()> {
          ON CONFLICT(name) DO UPDATE SET
              rank = rank + 1,
              last_accessed = excluded.last_accessed",
-            params![
-                &dir.name,
-                &dir.path
-                    .clone()
-                    .context("Error because selection doesn't have a path")?
-                    .to_str(),
-                now()?
-            ],
+            params![&dir.name, &dir.path.to_str(), now()?],
         )
         .context("Error executing sql statement to bump frecency")?;
     }
@@ -310,7 +296,7 @@ pub(crate) fn scores(conn: &Connection) -> Result<Dirs> {
         let path = PathBuf::from(r.get::<_, String>(1)?);
         let score: f64 = r.get(2)?;
 
-        Ok((name.clone(), Dir::from((name, Some(path), Some(score)))))
+        Ok((name.clone(), Dir::from((name, path, Some(score)))))
     })?;
 
     Ok(rows.collect::<rusqlite::Result<_>>()?)

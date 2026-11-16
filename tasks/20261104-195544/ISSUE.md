@@ -73,10 +73,10 @@ The flag is parsed into `_verbose` and never used.
 - `get_directories` and `get_repos` are identical apart from the `.git` check (`commands/open.rs:102-150`).
 - In `all` mode, the configured paths are read and canonicalized three times per `open`.
 - The score SQL `CASE` is written twice, in `list` and in `scores` (`db.rs:111-121`, `:291-300`).
-- `existing_session_names()` runs twice per `open` (`commands/open.rs:28`, `:242`).
+- ~~`existing_session_names()` runs twice per `open` (`commands/open.rs:28`, `:242`).~~ Fixed in #20261104-193829.
 - ~~`config::default_session()` runs in every sort comparison, reading an environment variable and allocating a string
   each time (`commands/open.rs:295`, `:298`).~~ Fixed in #20261104-192731.
 - ~~`get_client_terminal_size` calls tmux directly instead of going through the wrappers in `tmux.rs`
-  (`utils/mod.rs`, `get_client_terminal_size`).~~
+  (`utils/mod.rs`, `get_client_terminal_size`).~~ Fixed in #20261104-193619.
 - ~~`existing_session_names` does `.context(…).unwrap()`, so the context is pointless and an unexpected line panics
-  (`utils/tmux.rs:83-84`).~~
+  (`utils/tmux.rs:83-84`).~~ Fixed in #20261104-193619.

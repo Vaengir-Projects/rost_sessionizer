@@ -15,7 +15,7 @@ use crate::{
         },
     },
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::parser::ValuesRef;
 use std::{
     collections::HashMap,
@@ -79,8 +79,11 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         }
     }
 
-    let selected = select_via_fzf(&possible_selections.sort())
-        .context("Error selecting new or existing session")?;
+    let Some(selected) = select_via_fzf(&possible_selections.sort())
+        .context("Error selecting new or existing session")?
+    else {
+        return Ok(());
+    };
 
     let existing_session = tmux::tmux_session_exists(&selected.name)
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
@@ -216,13 +219,16 @@ fn get_worktrees() -> Result<Dirs> {
     Ok(dirs)
 }
 
+const FZF_NO_MATCH: i32 = 1;
+const FZF_INTERRUPTED: i32 = 130;
+
 /// Allows user to select the session they want to open.
 ///
 /// # Errors
 ///
 /// Returns `io::Error` if the fzf or any of the tmux commands fail, or
 /// `anyhow::Error` if anything with stdin or stdout fails.
-fn select_via_fzf(possible_selections: &[Dir]) -> Result<Dir> {
+fn select_via_fzf(possible_selections: &[Dir]) -> Result<Option<Dir>> {
     let mut child = Command::new("fzf")
         .args([
             "--margin=5%",
@@ -248,15 +254,21 @@ fn select_via_fzf(possible_selections: &[Dir]) -> Result<Dir> {
         }
     }
 
-    let selected = child
+    let output = child
         .wait_with_output()
-        .context("Error reading fzf stdout")?
-        .stdout;
-    let selected = String::from_utf8_lossy(&selected);
+        .context("Error reading fzf stdout")?;
+    match output.status.code() {
+        Some(0) => {}
+        Some(FZF_NO_MATCH | FZF_INTERRUPTED) => return Ok(None),
+        _ => bail!("fzf failed with {}", output.status),
+    }
+
+    let selected = String::from_utf8_lossy(&output.stdout);
     let selected = selected.trim();
     possible_selections
         .iter()
         .find(|dir| dir.name.as_str() == selected)
         .cloned()
         .context("Selected value isn't part of provided options")
+        .map(Some)
 }

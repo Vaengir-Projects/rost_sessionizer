@@ -3,12 +3,12 @@
 //!
 //! This module provides tmux wrapper functions that are used internally.
 
-use crate::utils::{
-    self,
-    types::{dir::Dir, session_name::SessionName},
+use crate::utils::types::{dir::Dir, session_name::SessionName};
+use anyhow::{Context, Result, bail};
+use std::{
+    env,
+    process::{Command, Stdio},
 };
-use anyhow::{Context, Result, anyhow, bail};
-use std::process::{Command, Stdio};
 
 pub(crate) fn tmux_command_without_output(args: &[&str]) -> Result<()> {
     let mut command = Command::new("tmux");
@@ -22,6 +22,24 @@ pub(crate) fn tmux_command_without_output(args: &[&str]) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) fn tmux_command_with_output(args: &[&str]) -> Result<String> {
+    let mut command = Command::new("tmux");
+    command.args(args);
+    let output = command
+        .output()
+        .with_context(|| format!("Error running {command:?}"))?;
+
+    if !output.status.success() {
+        bail!(
+            "{command:?} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 pub(crate) fn tmux_switch_client(
@@ -59,40 +77,34 @@ pub(crate) fn tmux_session_exists(target_session: &SessionName) -> Result<bool> 
 }
 
 pub(crate) fn current_session() -> Result<SessionName> {
-    let existing_sessions = existing_sessions().context("Error getting existing sessions")?;
-    let current_session = existing_sessions
-        .iter()
-        .find(|s| s.contains("attached"))
-        .context("No current session available")?;
-
-    match current_session.find(':') {
-        Some(i) => Ok(SessionName::new(&current_session[..i])),
-        None => Err(anyhow!("Error parsing current session name")),
+    // Outside tmux, `display-message` falls back to the most recently used session instead of
+    // failing, which would make `kill` target a session it wasn't called from.
+    if env::var_os("TMUX").is_none_or(|v| v.is_empty()) {
+        bail!("Not running inside tmux, so there is no current session");
     }
+
+    let output = tmux_command_with_output(&["display-message", "-p", "#{session_name}"])
+        .context("Error asking tmux for the current session")?;
+    let name = output.trim();
+    if name.is_empty() {
+        bail!("tmux didn't report a current session");
+    }
+
+    Ok(SessionName::new(name))
 }
 
 pub(crate) fn existing_session_names() -> Result<Vec<SessionName>> {
-    let existing_sessions = existing_sessions().context("Error getting existing sessions")?;
+    let output = tmux_command_with_output(&["list-sessions", "-F", "#{session_name}"])
+        .context("Error listing existing tmux sessions")?;
 
-    Ok(existing_sessions
-        .iter()
-        .map(|s| {
-            SessionName::new(
-                s.split_once(':')
-                    .context("Error parsing session names")
-                    .unwrap()
-                    .0,
-            )
-        })
-        .collect())
+    Ok(output.lines().map(SessionName::new).collect())
 }
 
 pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     let path_str = &selected_session.path.clone().unwrap();
     let path_str = path_str.to_string_lossy();
 
-    let (cols, rows) =
-        utils::get_client_terminal_size().context("Error getting client terminal size")?;
+    let (cols, rows) = client_terminal_size().context("Error getting client terminal size")?;
 
     // Create Session
     tmux_command_without_output(&[
@@ -126,18 +138,17 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     Ok(())
 }
 
-fn existing_sessions() -> Result<Vec<String>> {
-    // `tmux ls` exits with 1 when no server is running. That just means there are no sessions,
-    // so the exit status is deliberately ignored (stdout is empty then).
-    let existing_sessions = Command::new("tmux")
-        .arg("ls")
-        .output()
-        .context("Error listing existing tmux sessions")?
-        .stdout;
-    let existing_sessions = String::from_utf8_lossy(&existing_sessions).to_string();
+fn client_terminal_size() -> Result<(u16, u16)> {
+    let output =
+        tmux_command_with_output(&["display-message", "-p", "#{client_width}x#{client_height}"])
+            .context("Error asking tmux for the client size")?;
+    let (w, h) = output
+        .trim()
+        .split_once('x')
+        .context("Unexpected format from tmux display-message")?;
 
-    Ok(existing_sessions
-        .lines()
-        .map(ToString::to_string)
-        .collect::<Vec<String>>())
+    Ok((
+        w.parse().context("Error parsing cols")?,
+        h.parse().context("Error parsing rows")?,
+    ))
 }

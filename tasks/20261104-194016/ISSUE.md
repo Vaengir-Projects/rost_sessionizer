@@ -12,3 +12,8 @@
   because it only compares ranks. So `open -s dirs` followed by picking an open session, or picking a session made by
   hand (`tmux new -s scratch`), works for the switch. The command then fails with "Error because selection doesn't have
   a path" and exit code 1, and `db::age` is skipped.
+
+# Fix
+
+Every entry now has a path: open sessions get theirs from tmux and the default session falls back to the home directory
+when it isn't running. This removes the `unwrap()` in `create_tmux_session` and the missing-path error in `db::bump`.

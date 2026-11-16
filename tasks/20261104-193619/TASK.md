@@ -1,5 +1,5 @@
 # `kill` Can Hit the Wrong Session
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 190
 - TAGS: bug 0.1.0

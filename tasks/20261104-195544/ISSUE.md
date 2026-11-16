@@ -6,7 +6,7 @@
 
 Outside tmux, `open` doesn't fail with a clear message. Without a server it stops right away at `list-sessions`. With a
 server running it only fails after the fzf selection: `display-message` has no client there, so `client_terminal_size`
-(`src/utils/tmux.rs`) get `x` and fails with "Error parsing cols". None of these errors say `open` has to run inside
+(`src/utils/tmux.rs`) gets `x` and fails with "Error parsing cols". None of these errors say `open` has to run inside
 tmux.
 
 # L2: Database Busy Timeout

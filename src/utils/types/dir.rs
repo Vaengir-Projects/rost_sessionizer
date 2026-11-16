@@ -14,11 +14,28 @@ pub(crate) struct Dir {
     pub(crate) name: SessionName,
     pub(crate) path: Option<PathBuf>,
     pub(crate) rank: Option<f64>,
+    pub(crate) has_session: bool,
+}
+
+impl Dir {
+    pub(crate) fn session(name: SessionName) -> Self {
+        Self {
+            name,
+            path: None,
+            rank: None,
+            has_session: true,
+        }
+    }
 }
 
 impl From<(SessionName, Option<PathBuf>, Option<f64>)> for Dir {
     fn from((name, path, rank): (SessionName, Option<PathBuf>, Option<f64>)) -> Self {
-        Self { name, path, rank }
+        Self {
+            name,
+            path,
+            rank,
+            has_session: false,
+        }
     }
 }
 
@@ -50,9 +67,12 @@ impl HashMapExtend for Dirs {
                     e.insert(v);
                 }
                 Entry::Occupied(mut e) => {
-                    if e.get().rank.is_none() && v.rank.is_some() {
-                        e.insert(v);
+                    let existing = e.get_mut();
+                    if existing.rank.is_none() && v.rank.is_some() {
+                        existing.path = v.path;
+                        existing.rank = v.rank;
                     }
+                    existing.has_session |= v.has_session;
                 }
             }
         }
@@ -60,25 +80,17 @@ impl HashMapExtend for Dirs {
 
     fn sort(&self) -> Vec<Dir> {
         let default_session = config::default_session();
+        // Entries without a rank sort after every ranked entry.
+        let rank = |dir: &Dir| dir.rank.unwrap_or(f64::NEG_INFINITY);
+
         let mut sorted_vec: Vec<Dir> = self.values().cloned().collect();
         sorted_vec.sort_by(|a, b| {
-            if a.name == default_session {
-                return std::cmp::Ordering::Less;
-            }
-            if b.name == default_session {
-                return std::cmp::Ordering::Greater;
-            }
-
-            match (a.rank, b.rank) {
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (Some(ra), Some(rb)) => rb.total_cmp(&ra),
-                (None, None) => match (&a.path, &b.path) {
-                    (None, Some(_)) => std::cmp::Ordering::Less,
-                    (Some(_), None) => std::cmp::Ordering::Greater,
-                    _ => a.name.cmp(&b.name),
-                },
-            }
+            // `false` sorts before `true`, so `b` is compared to `a` to put `true` first.
+            (b.name == default_session)
+                .cmp(&(a.name == default_session))
+                .then_with(|| b.has_session.cmp(&a.has_session))
+                .then_with(|| rank(b).total_cmp(&rank(a)))
+                .then_with(|| a.name.cmp(&b.name))
         });
 
         sorted_vec

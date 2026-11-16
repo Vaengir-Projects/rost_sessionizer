@@ -37,7 +37,7 @@ fn new(sub_matches: &ArgMatches) -> Result<()> {
     let absolute_path = path
         .canonicalize()
         .context("Error canonicalizing the given path")?;
-    let dir = Dir::from((name.clone(), Some(absolute_path), None));
+    let dir = Dir::from((name.clone(), absolute_path, None));
 
     let conn = db::open().context("Error getting database conntection")?;
 
@@ -69,7 +69,7 @@ fn add(sub_matches: &ArgMatches) -> Result<()> {
         }
     };
 
-    let dir = Dir::from((name, Some(path), None));
+    let dir = Dir::from((name, path, None));
     let conn = db::open().context("Error getting database conntection")?;
 
     db::new(&conn, &dir)

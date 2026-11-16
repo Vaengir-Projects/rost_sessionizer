@@ -4,5 +4,5 @@ Either a command line argument or a environment variable would be better.
 
 This also applies to the default session name and layout.
 
-This was closed without the layout of the Default Session, or any session for that matter being configurable.
+This was closed without the layout of the default session, or any session for that matter being configurable.
 See #20260911-210132 for this.

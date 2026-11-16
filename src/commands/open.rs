@@ -15,7 +15,7 @@ use crate::{
         },
     },
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::parser::ValuesRef;
 use std::{
     collections::HashMap,
@@ -31,16 +31,16 @@ use std::{
 /// `anyhow::Error` if parsing the existing sessions fails.
 pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let default_session = config::default_session();
-    let session_names =
-        tmux::existing_session_names().context("Error getting existing session names")?;
 
     let mut possible_selections: Dirs = HashMap::new();
 
-    for session_name in session_names {
-        possible_selections.try_insert_dir(Dir::session(session_name));
+    for session in tmux::existing_sessions().context("Error getting existing sessions")? {
+        possible_selections.try_insert_dir(session);
     }
+
+    let home = dirs::home_dir().context("Couldn't determine the home directory")?;
     // Keep the default session selectable even when it isn't running.
-    possible_selections.try_insert_dir(Dir::from((default_session, None, None)));
+    possible_selections.try_insert_dir(Dir::from((default_session, home, None)));
 
     // Open connection to frecency database
     let mut conn = db::open().context("Error getting database conntection")?;
@@ -79,8 +79,11 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         }
     }
 
-    let selected = select_via_fzf(&possible_selections.sort())
-        .context("Error selecting new or existing session")?;
+    let Some(selected) = select_via_fzf(&possible_selections.sort())
+        .context("Error selecting new or existing session")?
+    else {
+        return Ok(());
+    };
 
     let existing_session = tmux::tmux_session_exists(&selected.name)
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
@@ -110,11 +113,7 @@ fn get_directories() -> Result<Dirs> {
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
-            dirs.try_insert_dir(Dir::from((
-                SessionName::new(&name),
-                Some(absolute_path.clone()),
-                None,
-            )));
+            dirs.try_insert_dir(Dir::from((SessionName::new(&name), absolute_path, None)));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -135,11 +134,7 @@ fn get_repos() -> Result<Dirs> {
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
-            dirs.try_insert_dir(Dir::from((
-                SessionName::new(&name),
-                Some(absolute_path.clone()),
-                None,
-            )));
+            dirs.try_insert_dir(Dir::from((SessionName::new(&name), absolute_path, None)));
         }
 
         Ok::<_, anyhow::Error>(())
@@ -174,11 +169,7 @@ fn get_worktrees() -> Result<Dirs> {
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
                     dirs.try_insert_dir(Dir::from((
                         SessionName::new(&name),
-                        Some(
-                            path.canonicalize()
-                                .context("Error canonicalizing path")?
-                                .clone(),
-                        ),
+                        path.canonicalize().context("Error canonicalizing path")?,
                         None,
                     )));
                 } else {
@@ -202,7 +193,7 @@ fn get_worktrees() -> Result<Dirs> {
                         let name = format!("{base}/{worktree}");
                         dirs.try_insert_dir(Dir::from((
                             SessionName::new(&name),
-                            Some(absolute_path),
+                            absolute_path,
                             None,
                         )));
                     }
@@ -216,13 +207,16 @@ fn get_worktrees() -> Result<Dirs> {
     Ok(dirs)
 }
 
+const FZF_NO_MATCH: i32 = 1;
+const FZF_INTERRUPTED: i32 = 130;
+
 /// Allows user to select the session they want to open.
 ///
 /// # Errors
 ///
 /// Returns `io::Error` if the fzf or any of the tmux commands fail, or
 /// `anyhow::Error` if anything with stdin or stdout fails.
-fn select_via_fzf(possible_selections: &[Dir]) -> Result<Dir> {
+fn select_via_fzf(possible_selections: &[Dir]) -> Result<Option<Dir>> {
     let mut child = Command::new("fzf")
         .args([
             "--margin=5%",
@@ -248,15 +242,21 @@ fn select_via_fzf(possible_selections: &[Dir]) -> Result<Dir> {
         }
     }
 
-    let selected = child
+    let output = child
         .wait_with_output()
-        .context("Error reading fzf stdout")?
-        .stdout;
-    let selected = String::from_utf8_lossy(&selected);
+        .context("Error reading fzf stdout")?;
+    match output.status.code() {
+        Some(0) => {}
+        Some(FZF_NO_MATCH | FZF_INTERRUPTED) => return Ok(None),
+        _ => bail!("fzf failed with {}", output.status),
+    }
+
+    let selected = String::from_utf8_lossy(&output.stdout);
     let selected = selected.trim();
     possible_selections
         .iter()
         .find(|dir| dir.name.as_str() == selected)
         .cloned()
         .context("Selected value isn't part of provided options")
+        .map(Some)
 }

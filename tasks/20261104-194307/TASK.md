@@ -1,5 +1,5 @@
 # Cancelling Fzf Is Reported as an Error
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 175
 - TAGS: bug 0.1.0

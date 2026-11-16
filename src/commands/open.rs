@@ -35,13 +35,12 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         tmux::existing_session_names().context("Error getting existing session names")?;
 
     let mut possible_selections: Dirs = HashMap::new();
-    possible_selections.try_insert_dir(Dir::from((default_session.clone(), None, None)));
 
     for session_name in session_names {
-        if session_name != default_session {
-            possible_selections.try_insert_dir(Dir::from((session_name, None, None)));
-        }
+        possible_selections.try_insert_dir(Dir::session(session_name));
     }
+    // Keep the default session selectable even when it isn't running.
+    possible_selections.try_insert_dir(Dir::from((default_session, None, None)));
 
     // Open connection to frecency database
     let mut conn = db::open().context("Error getting database conntection")?;
@@ -239,11 +238,9 @@ fn select_via_fzf(possible_selections: &[Dir]) -> Result<Dir> {
 
     let stdin = child.stdin.as_mut().context("Error opening fzf stdin")?;
 
-    let existing_session_names =
-        tmux::existing_session_names().context("Error getting existing session names")?;
     for dir in possible_selections {
         let name = &dir.name;
-        if existing_session_names.contains(name) {
+        if dir.has_session {
             // Display already open sessions in bold.
             writeln!(stdin, "\x1b[1m{name}\x1b[0m")?;
         } else {

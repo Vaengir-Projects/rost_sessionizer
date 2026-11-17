@@ -50,7 +50,7 @@ pub(crate) fn tmux_switch_client(
     tmux_command_without_output(&[
         "switch-client",
         "-t",
-        &format!("{target_session}:{}", target_window.unwrap_or(1)),
+        &format!("{}:{}", target_session.target(), target_window.unwrap_or(1)),
     ])
     .with_context(|| format!("Error switching tmux client to '{target_session}'"))?;
 
@@ -58,7 +58,7 @@ pub(crate) fn tmux_switch_client(
 }
 
 pub(crate) fn tmux_kill_session(target_session: &SessionName) -> Result<()> {
-    tmux_command_without_output(&["kill-session", "-t", target_session.as_str()])
+    tmux_command_without_output(&["kill-session", "-t", &target_session.target()])
         .with_context(|| format!("Error killing session '{target_session}'"))?;
 
     Ok(())
@@ -70,7 +70,7 @@ pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
 
 pub(crate) fn tmux_session_exists(target_session: &SessionName) -> Result<bool> {
     Command::new("tmux")
-        .args(["has-session", "-t", target_session.as_str()])
+        .args(["has-session", "-t", &target_session.target()])
         .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
@@ -140,7 +140,7 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     tmux_command_without_output(&[
         "new-window",
         "-t",
-        &format!("{}:2", selected_session.name),
+        &format!("{}:2", selected_session.name.target()),
         "-n",
         "Bash",
         "-c",

@@ -35,6 +35,11 @@ impl SessionName {
                 .collect(),
         )
     }
+
+    /// A tmux target that only matches this exact session, never a prefix or pattern.
+    pub(crate) fn target(&self) -> String {
+        format!("={}", self.0)
+    }
 }
 
 impl fmt::Display for SessionName {

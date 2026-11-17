@@ -3,7 +3,7 @@
 //!
 //! This module handles the CLI arguments using clap.
 
-use crate::utils;
+use crate::utils::types::session_name::SessionName;
 use clap::{Arg, ArgAction, Command, ValueEnum, ValueHint, crate_version, value_parser};
 use clap_complete::{Generator, Shell, generate};
 use std::{io, path::PathBuf};
@@ -58,7 +58,7 @@ pub fn build_cli() -> Command {
                                 .value_name("name")
                                 .help("Display name for frecency entry")
                                 .required(true)
-                                .value_parser(utils::validate_name),
+                                .value_parser(value_parser!(SessionName)),
                         )
                         .arg(
                             Arg::new("path")
@@ -77,7 +77,7 @@ pub fn build_cli() -> Command {
                             Arg::new("name")
                                 .value_name("name")
                                 .help("Display name for frecency database entry")
-                                .value_parser(utils::validate_name)
+                                .value_parser(value_parser!(SessionName))
                                 .conflicts_with("worktree"),
                         )
                         .arg(
@@ -98,14 +98,14 @@ pub fn build_cli() -> Command {
                                 .value_name("old_name")
                                 .help("Name of frecency entry to change")
                                 .required(true)
-                                .value_parser(utils::validate_name),
+                                .value_parser(value_parser!(SessionName)),
                         )
                         .arg(
                             Arg::new("new_name")
                                 .value_name("new_name")
                                 .help("Name the frecency entry should be changed to")
                                 .required(true)
-                                .value_parser(utils::validate_name),
+                                .value_parser(value_parser!(SessionName)),
                         ),
                 )
                 .subcommand(
@@ -117,7 +117,7 @@ pub fn build_cli() -> Command {
                                 .value_name("name")
                                 .help("Display name for frecency entry")
                                 .required(true)
-                                .value_parser(utils::validate_name),
+                                .value_parser(value_parser!(SessionName)),
                         ),
                 )
                 .subcommand(

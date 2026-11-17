@@ -3,8 +3,9 @@
 //!
 //! Provides a tmux session name that is safe to use as a tmux target.
 
+use anyhow::{Result, bail};
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 /// A tmux session name that is safe to use as a tmux target.
 ///
@@ -57,5 +58,21 @@ impl ToSql for SessionName {
 impl FromSql for SessionName {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         value.as_str().map(Self::new)
+    }
+}
+
+impl FromStr for SessionName {
+    type Err = anyhow::Error;
+
+    fn from_str(name: &str) -> Result<Self> {
+        if name.trim().is_empty() {
+            bail!("Error: name must contain at least one non-whitespace character");
+        }
+        // This is a limitation by tmux. See #20260911-210534
+        if name.contains(['.', ':']) {
+            bail!("Error: name must not contain '.' or ':', use '_' or '-' instead");
+        }
+
+        Ok(Self::new(name))
     }
 }

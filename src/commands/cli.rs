@@ -152,7 +152,7 @@ pub fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
     println!("Copy everything between the lines into the corresponding dir for the shell you use.");
 }
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum SearchMode {
     All,
     Dirs,

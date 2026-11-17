@@ -12,3 +12,10 @@
 - **b)** Directories are keyed by basename with `or_insert`. With `SESSIONIZER_PATHS=~/work/api:~/personal/api` only
   the first `api` shows up and `~/personal/api` can't be opened. The same thing happens between `get_directories`,
   `get_repos` and `get_worktrees` through `try_extend`.
+
+# Fix
+
+Names stay unique and a collision is decided by a fixed priority instead of the order of `-s`: frecency entries win
+over worktrees, worktrees over repos and repos over plain directories. Two entries of the same kind with the same name
+are still decided by the order in `SESSIONIZER_PATHS`, it's possible to give the other one its own name with
+`frecency new`.

@@ -51,15 +51,15 @@ The flag is parsed into `_verbose` and never used.
 `src/db.rs:53-68`, `:240-245`; `src/commands/frecency.rs:34-37`
 
 - `frecency rm` succeeds without any message when the name doesn't exist.
-- `frecency new` with a name that already exists shows the raw SQLite UNIQUE error. `modify` already maps that error to
-  a readable message.
+- ~~`frecency new` with a name that already exists shows the raw SQLite UNIQUE error. `modify` already maps that error
+  to a readable message.~~ Fixed in #20261104-195341.
 - `frecency new` accepts a path to a file.
 
 # L7: Copy-Pasted or Wrong Text
 
 - `frecency()` doc comment says "Kills the session the user is currently attached to." (`commands/frecency.rs:11`)
 - `startup()` doc comment says "Allows user to select the session they want to open." (`commands/startup.rs:10`)
-- Worktree errors say "Error finding all repos" (`commands/open.rs:58`, `:72`).
+- ~~Worktree errors say "Error finding all repos" (`commands/open.rs:58`, `:72`).~~ Fixed in #20261104-194936.
 - ~~`validate_name` says "use '_' or '_' instead" (`utils/mod.rs:51`).~~ Fixed in #20261104-192731.
 - Typos:
   - ~~`tmux_session_exisits`~~ Fixed in #20261104-193256.

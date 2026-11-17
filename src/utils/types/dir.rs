@@ -96,3 +96,221 @@ impl HashMapExtend for Dirs {
         sorted_vec
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::HashSet;
+
+    fn name() -> impl Strategy<Value = SessionName> {
+        "[a-d]{1,2}".prop_map(|s| SessionName::new(&s))
+    }
+
+    fn dir() -> impl Strategy<Value = Dir> {
+        (
+            name(),
+            "/[a-z]{1,3}(/[a-z]{1,3}){0,2}",
+            prop::option::of(0.0..100.0f64),
+            any::<bool>(),
+        )
+            .prop_map(|(name, path, rank, has_session)| Dir {
+                name,
+                path: PathBuf::from(path),
+                rank,
+                has_session,
+            })
+    }
+
+    fn collect(dirs: &[Dir]) -> Dirs {
+        let mut map = Dirs::new();
+        for dir in dirs {
+            map.try_insert_dir(dir.clone());
+        }
+
+        map
+    }
+
+    fn unique_dirs() -> impl Strategy<Value = Vec<Dir>> {
+        prop::collection::vec(dir(), 0..20).prop_map(|dirs| collect(&dirs).into_values().collect())
+    }
+
+    fn dirs_and_shuffled() -> impl Strategy<Value = (Vec<Dir>, Vec<Dir>)> {
+        unique_dirs().prop_flat_map(|dirs| (Just(dirs.clone()), Just(dirs).prop_shuffle()))
+    }
+
+    fn fields(dir: &Dir) -> (&SessionName, &PathBuf, Option<f64>, bool) {
+        (&dir.name, &dir.path, dir.rank, dir.has_session)
+    }
+
+    fn named(name: &str, rank: Option<f64>, has_session: bool) -> Dir {
+        Dir {
+            name: SessionName::new(name),
+            path: PathBuf::from(format!("/{name}")),
+            rank,
+            has_session,
+        }
+    }
+
+    #[test]
+    fn session_entries_are_running_and_unranked() {
+        let dir = Dir::session(SessionName::new("api"), PathBuf::from("/api"));
+        assert!(dir.has_session);
+        assert_eq!(dir.rank, None);
+    }
+
+    #[test]
+    fn converted_entries_are_not_sessions() {
+        let dir = Dir::from((SessionName::new("api"), PathBuf::from("/api"), Some(2.0)));
+        assert!(!dir.has_session);
+        assert_eq!(dir.rank, Some(2.0));
+    }
+
+    #[test]
+    fn equality_compares_names_only() {
+        assert_eq!(named("api", Some(1.0), true), named("api", None, false));
+        assert_ne!(named("api", None, false), named("web", None, false));
+    }
+
+    #[test]
+    fn a_ranked_entry_wins_regardless_of_merge_order() {
+        let stored = Dir::from((SessionName::new("api"), PathBuf::from("/stored"), Some(3.0)));
+        let found = Dir::from((SessionName::new("api"), PathBuf::from("/found"), None));
+
+        for (first, second) in [(&stored, &found), (&found, &stored)] {
+            let mut map = collect(std::slice::from_ref(first));
+            map.try_extend(collect(std::slice::from_ref(second)));
+            let api = &map[&SessionName::new("api")];
+            assert_eq!(api.path, PathBuf::from("/stored"));
+            assert_eq!(api.rank, Some(3.0));
+        }
+    }
+
+    #[test]
+    fn sorts_like_the_documented_example() {
+        let default = config::default_session();
+        let entries = [
+            Dir::session(default.clone(), PathBuf::from("/home")),
+            named("api", Some(12.0), true),
+            named("notes", None, true),
+            named("dotfiles", Some(40.0), false),
+            named("blog", Some(5.0), false),
+            named("alpha", None, false),
+            named("zeta", None, false),
+        ];
+        let sorted: Vec<String> = collect(&entries)
+            .sort()
+            .iter()
+            .map(|d| d.name.to_string())
+            .collect();
+        assert_eq!(
+            sorted,
+            [
+                default.as_str(),
+                "api",
+                "notes",
+                "dotfiles",
+                "blog",
+                "alpha",
+                "zeta"
+            ]
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn try_insert_dir_keeps_the_first_entry_per_name(
+            dirs in prop::collection::vec(dir(), 0..20),
+        ) {
+            let map = collect(&dirs);
+            let names: HashSet<_> = dirs.iter().map(|d| &d.name).collect();
+            prop_assert_eq!(map.len(), names.len());
+            for (key, entry) in &map {
+                prop_assert_eq!(key, &entry.name);
+                let first = dirs.iter().find(|d| &d.name == key).unwrap();
+                prop_assert_eq!(fields(entry), fields(first));
+            }
+        }
+
+        #[test]
+        fn try_extend_merges_by_name(
+            existing in prop::collection::vec(dir(), 0..20),
+            incoming in prop::collection::vec(dir(), 0..20),
+        ) {
+            let before = collect(&existing);
+            let other = collect(&incoming);
+            let mut merged = before.clone();
+            merged.try_extend(other.clone());
+
+            let all_names: HashSet<_> = before.keys().chain(other.keys()).collect();
+            prop_assert_eq!(merged.len(), all_names.len());
+            for (name, entry) in &merged {
+                match (before.get(name), other.get(name)) {
+                    (Some(old), None) => prop_assert_eq!(fields(entry), fields(old)),
+                    (None, Some(new)) => prop_assert_eq!(fields(entry), fields(new)),
+                    (Some(old), Some(new)) => {
+                        let takes_rank = old.rank.is_none() && new.rank.is_some();
+                        let source = if takes_rank { new } else { old };
+                        prop_assert_eq!(&entry.path, &source.path);
+                        prop_assert_eq!(entry.rank, source.rank);
+                        prop_assert_eq!(entry.has_session, old.has_session || new.has_session);
+                    }
+                    (None, None) => prop_assert!(false, "{} came from nowhere", name),
+                }
+            }
+        }
+
+        #[test]
+        fn sort_returns_every_entry_exactly_once(dirs in prop::collection::vec(dir(), 0..20)) {
+            let map = collect(&dirs);
+            let mut sorted: Vec<_> = map.sort().into_iter().map(|d| d.name).collect();
+            let mut expected: Vec<_> = map.into_keys().collect();
+            sorted.sort();
+            expected.sort();
+            prop_assert_eq!(sorted, expected);
+        }
+
+        #[test]
+        fn sort_follows_the_priority_rules(
+            dirs in prop::collection::vec(dir(), 0..20),
+            with_default in any::<bool>()
+        ) {
+            let default = config::default_session();
+            let mut map = collect(&dirs);
+            if with_default {
+                map.try_insert_dir(Dir::from((default.clone(), PathBuf::from("/home"), None)));
+            }
+            let sorted = map.sort();
+
+            if map.contains_key(&default) {
+                prop_assert_eq!(&sorted[0].name, &default);
+            }
+            for pair in sorted.windows(2) {
+                let (a, b) = (&pair[0], &pair[1]);
+                prop_assert_ne!(&b.name, &default);
+                if a.name == default {
+                    continue;
+                }
+                prop_assert!(a.has_session >= b.has_session);
+                if a.has_session != b.has_session {
+                    continue;
+                }
+                match (a.rank, b.rank) {
+                    (None, Some(_)) => {
+                        prop_assert!(false, "unranked {} before ranked {}", a.name, b.name);
+                    }
+                    (Some(x), Some(y)) if x.total_cmp(&y).is_ne() => prop_assert!(x > y),
+                    (Some(_), None) => {}
+                    _ => prop_assert!(a.name < b.name),
+                }
+            }
+        }
+
+        #[test]
+        fn sort_does_not_depend_on_insertion_order((dirs, shuffled) in dirs_and_shuffled()) {
+            let first: Vec<_> = collect(&dirs).sort().into_iter().map(|d| d.name).collect();
+            let second: Vec<_> = collect(&shuffled).sort().into_iter().map(|d| d.name).collect();
+            prop_assert_eq!(first, second);
+        }
+    }
+}

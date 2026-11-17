@@ -271,7 +271,7 @@ pub(crate) fn age(conn: &mut Connection) -> Result<()> {
     if total > MAX_AGE {
         let factor = 0.9 * MAX_AGE / total;
         tx.execute("UPDATE visits SET rank = rank * ?1", [factor])?;
-        tx.execute("DELETE FROM visits WHERE rank < 1", [])?;
+        tx.execute("DELETE FROM visits WHERE rank > 0 AND rank < 1", [])?;
     }
 
     tx.commit().context("Error commit the transaction")

@@ -45,37 +45,24 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     // Open connection to frecency database
     let mut conn = db::open().context("Error getting database conntection")?;
 
-    for search_mode in search_modes {
-        match search_mode {
-            SearchMode::All => {
-                // Add all Directories
-                possible_selections
-                    .try_extend(get_directories().context("Error finding all directories")?);
-
-                // Add all Repos
-                possible_selections.try_extend(get_repos().context("Error finding all repos")?);
-
-                // Add all Worktrees
-                possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
-
-                // Add all from Frecency db
-                possible_selections
-                    .try_extend(db::scores(&conn).context("Error getting paths by frecency")?);
-            }
-            SearchMode::Dirs => {
-                possible_selections
-                    .try_extend(get_directories().context("Error finding all directories")?);
-            }
-            SearchMode::Repos => {
-                possible_selections.try_extend(get_repos().context("Error finding all repos")?);
-            }
-            SearchMode::Worktrees => {
-                possible_selections.try_extend(get_worktrees().context("Error finding all repos")?);
-            }
-            SearchMode::Frecency => {
-                possible_selections
-                    .try_extend(db::scores(&conn).context("Error getting paths by frecency")?);
-            }
+    let search_modes: Vec<SearchMode> = search_modes.copied().collect();
+    let sources: [(SearchMode, &dyn Fn() -> Result<Dirs>); 4] = [
+        (SearchMode::Frecency, &|| {
+            db::scores(&conn).context("Error getting paths by frecency")
+        }),
+        (SearchMode::Worktrees, &|| {
+            get_worktrees().context("Error finding all worktrees")
+        }),
+        (SearchMode::Repos, &|| {
+            get_repos().context("Error finding all repositories")
+        }),
+        (SearchMode::Dirs, &|| {
+            get_directories().context("Error finding all directories")
+        }),
+    ];
+    for (mode, load) in sources {
+        if search_modes.contains(&SearchMode::All) || search_modes.contains(&mode) {
+            possible_selections.try_extend(load()?);
         }
     }
 

@@ -41,7 +41,7 @@ pub fn kill_all_sessions() -> Result<()> {
     let default_session = config::default_session();
     let mut sessions =
         tmux::existing_session_names().context("Error getting existing session names")?;
-    sessions.retain(|s| !s.as_str().contains(default_session.as_str()));
+    sessions.retain(|s| s != &default_session);
 
     tmux::tmux_switch_client(&default_session, None)
         .context("Error switching to default session")?;

@@ -160,3 +160,13 @@ pub enum SearchMode {
     Worktrees,
     Frecency,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        build_cli().debug_assert();
+    }
+}

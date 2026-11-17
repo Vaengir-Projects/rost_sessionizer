@@ -1,5 +1,5 @@
 # Session Targets Match by Prefix
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 170
 - TAGS: bug 0.1.0

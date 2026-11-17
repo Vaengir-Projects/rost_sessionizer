@@ -9,3 +9,8 @@ The code hard-codes windows `:1` and `:2`. With tmux's default `base-index 0`:
 - `switch-client -t name:1` fails with "can't find window: 1", and the failure is ignored (F2), so `open` never moves
   the client.
 - `startup` outside tmux runs `attach-session -t Default:1`, which fails, so the terminal is never attached.
+
+# Fix
+
+No window index is hard-coded anymore: the second window is created at the next free index (`=name:`), and switching
+or attaching always targets the lowest-numbered window (`=name:^`). This works with any `base-index`.

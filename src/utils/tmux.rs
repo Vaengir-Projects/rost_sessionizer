@@ -43,14 +43,11 @@ pub(crate) fn tmux_command_with_output(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub(crate) fn tmux_switch_client(
-    target_session: &SessionName,
-    target_window: Option<usize>,
-) -> Result<()> {
+pub(crate) fn tmux_switch_client(target_session: &SessionName) -> Result<()> {
     tmux_command_without_output(&[
         "switch-client",
         "-t",
-        &format!("{target_session}:{}", target_window.unwrap_or(1)),
+        &format!("{}:^", target_session.target()),
     ])
     .with_context(|| format!("Error switching tmux client to '{target_session}'"))?;
 
@@ -58,10 +55,15 @@ pub(crate) fn tmux_switch_client(
 }
 
 pub(crate) fn tmux_kill_session(target_session: &SessionName) -> Result<()> {
-    tmux_command_without_output(&["kill-session", "-t", target_session.as_str()])
+    tmux_command_without_output(&["kill-session", "-t", &target_session.target()])
         .with_context(|| format!("Error killing session '{target_session}'"))?;
 
     Ok(())
+}
+
+pub(crate) fn tmux_kill_other_sessions(keep: &SessionName) -> Result<()> {
+    tmux_command_without_output(&["kill-session", "-a", "-t", &keep.target()])
+        .with_context(|| format!("Error killing all sessions except '{keep}'"))
 }
 
 pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
@@ -70,7 +72,7 @@ pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
 
 pub(crate) fn tmux_session_exists(target_session: &SessionName) -> Result<bool> {
     Command::new("tmux")
-        .args(["has-session", "-t", target_session.as_str()])
+        .args(["has-session", "-t", &target_session.target()])
         .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
@@ -92,13 +94,6 @@ pub(crate) fn current_session() -> Result<SessionName> {
     }
 
     Ok(SessionName::new(name))
-}
-
-pub(crate) fn existing_session_names() -> Result<Vec<SessionName>> {
-    let output = tmux_command_with_output(&["list-sessions", "-F", "#{session_name}"])
-        .context("Error listing existing tmux sessions")?;
-
-    Ok(output.lines().map(SessionName::new).collect())
 }
 
 pub(crate) fn existing_sessions() -> Result<Vec<Dir>> {
@@ -140,15 +135,14 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     tmux_command_without_output(&[
         "new-window",
         "-t",
-        &format!("{}:2", selected_session.name),
+        &format!("{}:", selected_session.name.target()),
         "-n",
         "Bash",
         "-c",
         &path_str,
     ])
     .context("Error creating second window")?;
-    tmux_switch_client(&selected_session.name, Some(1))
-        .context("Error switching back to first window")?;
+    tmux_switch_client(&selected_session.name).context("Error switching back to first window")?;
 
     Ok(())
 }

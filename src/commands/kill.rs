@@ -4,7 +4,7 @@
 //! This module handles the logic to kill current or all sessions.
 
 use crate::{config, utils::tmux};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 /// Kills the session the user is currently attached to.
 ///
@@ -16,8 +16,7 @@ pub fn kill_current_session() -> Result<()> {
     // Must run before switching: afterwards the client is in the default session.
     let current_session = tmux::current_session().context("Error getting current session")?;
 
-    tmux::tmux_switch_client(&default_session, None)
-        .context("Error switching to default session")?;
+    tmux::tmux_switch_client(&default_session).context("Error switching to default session")?;
 
     if current_session == default_session {
         tmux::tmux_display_message(&format!(
@@ -31,34 +30,16 @@ pub fn kill_current_session() -> Result<()> {
     Ok(())
 }
 
-/// Kills all sessions the except the Default session.
+/// Kills all sessions except the default session.
 ///
 /// # Errors
 ///
-/// Returns `io::Error` if any of the tmux commands fail, or
-/// `anyhow::Error` if parsing the existing sessions fails.
+/// Returns `io::Error` if any of the tmux commands fail.
 pub fn kill_all_sessions() -> Result<()> {
     let default_session = config::default_session();
-    let mut sessions =
-        tmux::existing_session_names().context("Error getting existing session names")?;
-    sessions.retain(|s| !s.as_str().contains(default_session.as_str()));
 
-    tmux::tmux_switch_client(&default_session, None)
-        .context("Error switching to default session")?;
-
-    let mut failed = Vec::new();
-    for session in sessions {
-        if let Err(e) = tmux::tmux_kill_session(&session) {
-            failed.push(format!("{e:#}"));
-        }
-    }
-    if !failed.is_empty() {
-        bail!(
-            "Failed to kill {} session(s):\n{}",
-            failed.len(),
-            failed.join("\n")
-        );
-    }
+    tmux::tmux_switch_client(&default_session).context("Error switching to default session")?;
+    tmux::tmux_kill_other_sessions(&default_session).context("Error killing all other sessions")?;
 
     Ok(())
 }

@@ -89,8 +89,7 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         .with_context(|| format!("Error checking if session '{}' exists", selected.name))?;
 
     if existing_session {
-        tmux::tmux_switch_client(&selected.name, Some(1))
-            .context("Error switching to existing session")?;
+        tmux::tmux_switch_client(&selected.name).context("Error switching to existing session")?;
     } else {
         tmux::create_tmux_session(&selected).context("Error creating new tmux session")?;
     }

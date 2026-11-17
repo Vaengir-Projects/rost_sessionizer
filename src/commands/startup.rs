@@ -32,7 +32,7 @@ pub fn startup() -> Result<()> {
                 create_default_session(&default_session).with_context(|| {
                     format!("Error creating default session '{default_session}'")
                 })?;
-                tmux::tmux_switch_client(&default_session, Some(1)).with_context(|| {
+                tmux::tmux_switch_client(&default_session).with_context(|| {
                     format!(
                         "Error switching to first window of default session '{default_session}'"
                     )
@@ -45,7 +45,7 @@ pub fn startup() -> Result<()> {
             tmux::tmux_command_without_output(&[
                 "attach-session",
                 "-t",
-                &format!("{default_session}:1"),
+                &format!("{}:^", default_session.target()),
             ])
             .with_context(|| format!("Error attaching to default session '{default_session}'"))?;
         }
@@ -74,7 +74,7 @@ fn create_default_session(default_session: &SessionName) -> Result<()> {
     tmux::tmux_command_without_output(&[
         "new-window",
         "-t",
-        &format!("{default_session}:2"),
+        &format!("{}:", default_session.target()),
         "-c",
         &home,
     ])

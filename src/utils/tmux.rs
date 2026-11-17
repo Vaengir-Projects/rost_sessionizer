@@ -43,14 +43,11 @@ pub(crate) fn tmux_command_with_output(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub(crate) fn tmux_switch_client(
-    target_session: &SessionName,
-    target_window: Option<usize>,
-) -> Result<()> {
+pub(crate) fn tmux_switch_client(target_session: &SessionName) -> Result<()> {
     tmux_command_without_output(&[
         "switch-client",
         "-t",
-        &format!("{}:{}", target_session.target(), target_window.unwrap_or(1)),
+        &format!("{}:^", target_session.target()),
     ])
     .with_context(|| format!("Error switching tmux client to '{target_session}'"))?;
 
@@ -140,15 +137,14 @@ pub(crate) fn create_tmux_session(selected_session: &Dir) -> Result<()> {
     tmux_command_without_output(&[
         "new-window",
         "-t",
-        &format!("{}:2", selected_session.name.target()),
+        &format!("{}:", selected_session.name.target()),
         "-n",
         "Bash",
         "-c",
         &path_str,
     ])
     .context("Error creating second window")?;
-    tmux_switch_client(&selected_session.name, Some(1))
-        .context("Error switching back to first window")?;
+    tmux_switch_client(&selected_session.name).context("Error switching back to first window")?;
 
     Ok(())
 }

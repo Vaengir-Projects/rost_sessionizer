@@ -16,8 +16,7 @@ pub fn kill_current_session() -> Result<()> {
     // Must run before switching: afterwards the client is in the default session.
     let current_session = tmux::current_session().context("Error getting current session")?;
 
-    tmux::tmux_switch_client(&default_session, None)
-        .context("Error switching to default session")?;
+    tmux::tmux_switch_client(&default_session).context("Error switching to default session")?;
 
     if current_session == default_session {
         tmux::tmux_display_message(&format!(
@@ -43,8 +42,7 @@ pub fn kill_all_sessions() -> Result<()> {
         tmux::existing_session_names().context("Error getting existing session names")?;
     sessions.retain(|s| s != &default_session);
 
-    tmux::tmux_switch_client(&default_session, None)
-        .context("Error switching to default session")?;
+    tmux::tmux_switch_client(&default_session).context("Error switching to default session")?;
 
     let mut failed = Vec::new();
     for session in sessions {

@@ -61,6 +61,11 @@ pub(crate) fn tmux_kill_session(target_session: &SessionName) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn tmux_kill_other_sessions(keep: &SessionName) -> Result<()> {
+    tmux_command_without_output(&["kill-session", "-a", "-t", &keep.target()])
+        .with_context(|| format!("Error killing all sessions except '{keep}'"))
+}
+
 pub(crate) fn tmux_display_message(message: &str) -> Result<()> {
     tmux_command_without_output(&["display-message", message]).context("Error sending notification")
 }
@@ -89,13 +94,6 @@ pub(crate) fn current_session() -> Result<SessionName> {
     }
 
     Ok(SessionName::new(name))
-}
-
-pub(crate) fn existing_session_names() -> Result<Vec<SessionName>> {
-    let output = tmux_command_with_output(&["list-sessions", "-F", "#{session_name}"])
-        .context("Error listing existing tmux sessions")?;
-
-    Ok(output.lines().map(SessionName::new).collect())
 }
 
 pub(crate) fn existing_sessions() -> Result<Vec<Dir>> {

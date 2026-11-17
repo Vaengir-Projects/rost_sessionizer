@@ -5,7 +5,7 @@ use crate::{
         session_name::SessionName,
     },
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, ErrorCode, params};
 use std::{
     fs,
@@ -48,8 +48,24 @@ pub(crate) fn open() -> Result<Connection> {
         ) STRICT;",
     )
     .context("Error creating 'visits' table")?;
+    remove_stale(&conn).context("Error removing entries whose path no longer exists")?;
 
     Ok(conn)
+}
+
+fn remove_stale(conn: &Connection) -> Result<()> {
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT name, path FROM visits")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    for (name, path) in rows {
+        if matches!(Path::new(&path).try_exists(), Ok(false)) {
+            conn.execute("DELETE FROM visits WHERE name = ?1", [name])?;
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn new(conn: &Connection, dir: &Dir) -> Result<()> {
@@ -57,6 +73,14 @@ pub(crate) fn new(conn: &Connection, dir: &Dir) -> Result<()> {
         "INSERT INTO visits (name, path, rank, last_accessed) VALUES (?1, ?2, 0, ?3)",
         params![&dir.name, &dir.path.to_str(), now()?],
     )
+    .map_err(|e| match e {
+        rusqlite::Error::SqliteFailure(ref err, _)
+            if err.code == ErrorCode::ConstraintViolation =>
+        {
+            anyhow!("Error: An entry named '{}' already exists", dir.name)
+        }
+        other => anyhow::Error::from(other),
+    })
     .context("Error executing sql statement to insert entry into frecency database")?;
 
     Ok(())

@@ -119,7 +119,7 @@ pub(crate) fn select_all(conn: &Connection) -> Result<()> {
             row.name,
             row.score,
             row.rank,
-            ago(t - row.last_accessed),
+            ago(t.saturating_sub(row.last_accessed)),
             tilde(&row.path, home.as_deref()),
         );
     }
@@ -209,7 +209,7 @@ impl Time {
 
 impl From<i64> for Time {
     fn from(secs: i64) -> Self {
-        match secs.abs() {
+        match secs {
             s if s >= 86_400 => Self::Second(s).to_day(),
             s if s >= 3600 => Self::Second(s).to_hour(),
             s if s >= 60 => Self::Second(s).to_minute(),

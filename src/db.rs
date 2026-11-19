@@ -329,3 +329,399 @@ fn scores_at(conn: &Connection, now: i64) -> Result<Dirs> {
 
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use rusqlite::OptionalExtension;
+    use std::collections::BTreeMap;
+    use tempfile::TempDir;
+
+    const NOW: i64 = 1_800_000_000;
+
+    fn memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+
+        conn
+    }
+
+    fn insert(conn: &Connection, name: &str, path: &str, rank: f64, last_accessed: i64) {
+        conn.execute(
+            "INSERT INTO visits (name, path, rank, last_accessed) VALUES (?1, ?2, ?3, ?4)",
+            params![name, path, rank, last_accessed],
+        )
+        .unwrap();
+    }
+
+    fn row(conn: &Connection, name: &str) -> Option<(String, f64, i64)> {
+        conn.query_row(
+            "SELECT path, rank, last_accessed FROM visits WHERE name = ?1",
+            [name],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .unwrap()
+    }
+
+    fn all_ranks(conn: &Connection) -> BTreeMap<String, f64> {
+        let mut stmt = conn.prepare("SELECT name, rank FROM visits").unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    fn entry(name: &str, path: &str) -> Dir {
+        Dir::from((SessionName::new(name), PathBuf::from(path), None))
+    }
+
+    fn check_aging(before: &[f64], after: &BTreeMap<String, f64>) -> Result<(), TestCaseError> {
+        let total: f64 = before.iter().sum();
+        let factor = if total > 10_000.0 {
+            0.9 * 10_000.0 / total
+        } else {
+            1.0
+        };
+        for (i, rank) in before.iter().enumerate() {
+            let name = i.to_string();
+            let expected = rank * factor;
+            if *rank == 0.0 {
+                prop_assert_eq!(after.get(&name).copied(), Some(0.0));
+            } else if expected < 1.0 {
+                prop_assert!(!after.contains_key(&name));
+            } else {
+                let actual = after.get(&name).copied().unwrap_or(f64::NAN);
+                prop_assert!((actual - expected).abs() <= 1e-9 * expected);
+            }
+        }
+        let bound = if total > 10_000.0 { 9_000.0 } else { total };
+        prop_assert!(after.values().sum::<f64>() <= bound + 1e-6);
+
+        Ok(())
+    }
+
+    mod schema_and_stale_entries {
+        use super::*;
+
+        #[test]
+        fn init_is_idempotent() {
+            let conn = memory_db();
+            insert(&conn, "root", "/", 1.0, NOW);
+            init(&conn).unwrap();
+            assert!(row(&conn, "root").is_some());
+        }
+
+        #[test]
+        fn init_removes_stale_entries() {
+            let tmp = TempDir::new().unwrap();
+            let kept = tmp.path().join("kept");
+            let gone = tmp.path().join("gone");
+            fs::create_dir(&kept).unwrap();
+            fs::create_dir(&gone).unwrap();
+
+            let conn = memory_db();
+            insert(&conn, "kept", kept.to_str().unwrap(), 1.0, NOW);
+            insert(&conn, "gone", gone.to_str().unwrap(), 1.0, NOW);
+            fs::remove_dir(&gone).unwrap();
+            init(&conn).unwrap();
+
+            assert!(row(&conn, "kept").is_some());
+            assert!(row(&conn, "gone").is_none());
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(32))]
+
+            #[test]
+            fn init_keeps_existing_paths(
+                entries in prop::collection::btree_map("[a-z]{1,8}", any::<bool>(), 0..10),
+            ) {
+                let tmp = TempDir::new().unwrap();
+                let conn = memory_db();
+                for (name, exists) in &entries {
+                    let path = tmp.path().join(name);
+                    if *exists {
+                        fs::create_dir(&path).unwrap();
+                    }
+                    insert(&conn, name, path.to_str().unwrap(), 1.0, NOW);
+                }
+                init(&conn).unwrap();
+
+                let remaining: Vec<_> = all_ranks(&conn).into_keys().collect();
+                let existing: Vec<_> = entries
+                    .iter()
+                    .filter(|(_, e)| **e)
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                prop_assert_eq!(remaining, existing);
+            }
+        }
+    }
+
+    mod new {
+        use super::*;
+
+        #[test]
+        fn adds_bookmark_with_rank_zero() {
+            let conn = memory_db();
+            let before = now().unwrap();
+            new(&conn, &entry("api", "/work/api")).unwrap();
+            let after = now().unwrap();
+
+            let (path, rank, last_accessed) = row(&conn, "api").unwrap();
+            assert_eq!(path, "/work/api");
+            assert_eq!(rank, 0.0);
+            assert!((before..=after).contains(&last_accessed));
+        }
+
+        #[test]
+        fn rejects_existing_name() {
+            let conn = memory_db();
+            new(&conn, &entry("api", "/work/api")).unwrap();
+            let error = new(&conn, &entry("api", "/personal/api")).unwrap_err();
+
+            assert!(format!("{error:#}").contains("already exists"));
+            assert_eq!(row(&conn, "api").unwrap().0, "/work/api");
+        }
+    }
+
+    mod bump {
+        use super::*;
+
+        #[test]
+        fn adds_unknown_entries_with_rank_one() {
+            let conn = memory_db();
+            bump(&conn, &entry("api", "/work/api")).unwrap();
+
+            let (path, rank, _) = row(&conn, "api").unwrap();
+            assert_eq!(path, "/work/api");
+            assert_eq!(rank, 1.0);
+        }
+
+        #[test]
+        fn refreshes_last_accessed_but_keeps_the_path() {
+            let conn = memory_db();
+            insert(&conn, "api", "/stored", 2.0, 0);
+            let before = now().unwrap();
+            bump(&conn, &entry("api", "/elsewhere")).unwrap();
+
+            let (path, rank, last_accessed) = row(&conn, "api").unwrap();
+            assert_eq!(path, "/stored");
+            assert_eq!(rank, 3.0);
+            assert!(last_accessed >= before);
+        }
+
+        #[test]
+        fn ignores_default_session() {
+            let conn = memory_db();
+            let default = config::default_session();
+            bump(
+                &conn,
+                &Dir::from((default.clone(), PathBuf::from("/home"), None)),
+            )
+            .unwrap();
+            assert!(row(&conn, default.as_str()).is_none());
+        }
+
+        proptest! {
+            #[test]
+            fn counts_every_visit(visits in 1..50u32) {
+                let conn = memory_db();
+                for _ in 0..visits {
+                    bump(&conn, &entry("api", "/work/api")).unwrap();
+                }
+                let rank = row(&conn, "api").unwrap().1;
+                prop_assert!(rank.total_cmp(&f64::from(visits)).is_eq());
+            }
+        }
+    }
+
+    mod modify {
+        use super::*;
+
+        #[test]
+        fn renames_entry() {
+            let conn = memory_db();
+            insert(&conn, "api", "/work/api", 2.0, NOW);
+            modify(
+                &conn,
+                &SessionName::new("api"),
+                &SessionName::new("work-api"),
+            )
+            .unwrap();
+
+            assert!(row(&conn, "api").is_none());
+            assert_eq!(
+                row(&conn, "work-api").unwrap(),
+                ("/work/api".to_owned(), 2.0, NOW)
+            );
+        }
+
+        #[test]
+        fn refuses_overwrite_of_entry() {
+            let conn = memory_db();
+            insert(&conn, "api", "/work/api", 1.0, NOW);
+            insert(&conn, "web", "/work/web", 1.0, NOW);
+            let error =
+                modify(&conn, &SessionName::new("api"), &SessionName::new("web")).unwrap_err();
+
+            assert!(format!("{error:#}").contains("already exists"));
+            assert_eq!(row(&conn, "api").unwrap().0, "/work/api");
+            assert_eq!(row(&conn, "web").unwrap().0, "/work/web");
+        }
+
+        #[test]
+        fn reports_missing_entry() {
+            let conn = memory_db();
+            let error =
+                modify(&conn, &SessionName::new("api"), &SessionName::new("web")).unwrap_err();
+            assert!(format!("{error:#}").contains("No entry named 'api'"));
+        }
+    }
+
+    mod remove {
+        use super::*;
+
+        #[test]
+        fn deletes_entry() {
+            let conn = memory_db();
+            insert(&conn, "api", "/work/api", 1.0, NOW);
+            remove(&conn, &SessionName::new("api")).unwrap();
+            assert!(row(&conn, "api").is_none());
+        }
+
+        #[test]
+        fn missing_entry_is_silent() {
+            let conn = memory_db();
+            assert!(remove(&conn, &SessionName::new("api")).is_ok());
+        }
+    }
+
+    mod age {
+        use super::*;
+
+        #[test]
+        fn scales_ranks_and_keeps_bookmarks() {
+            let mut conn = memory_db();
+            insert(&conn, "big", "/big", 20_000.0, NOW);
+            insert(&conn, "small", "/small", 1.0, NOW);
+            insert(&conn, "bookmark", "/bookmark", 0.0, NOW);
+            age(&mut conn).unwrap();
+
+            let after = all_ranks(&conn);
+            let factor = 0.9 * 10_000.0 / 20_001.0;
+            assert!((after["big"] - 20_000.0 * factor).abs() < 1e-9);
+            assert!(!after.contains_key("small"));
+            assert_eq!(after["bookmark"], 0.0);
+        }
+
+        proptest! {
+            #[test]
+            fn bounds_total_and_keeps_bookmarks(
+                ranks in prop::collection::vec(prop_oneof![Just(0.0), 1.0..5_000.0f64], 0..20),
+            ) {
+                let mut conn = memory_db();
+                for (i, rank) in ranks.iter().enumerate() {
+                    insert(&conn, &i.to_string(), "/", *rank, NOW);
+                }
+                age(&mut conn).unwrap();
+                check_aging(&ranks, &all_ranks(&conn))?;
+            }
+
+            #[test]
+            fn aged_ranks_never_reach_zero(
+                ranks in prop::collection::vec(1.0..5_000.0f64, 0..20),
+                rounds in 1..10usize,
+            ) {
+                let mut conn = memory_db();
+                for (i, rank) in ranks.iter().enumerate() {
+                    insert(&conn, &i.to_string(), "/", *rank, NOW);
+                }
+                for _ in 0..rounds {
+                    conn.execute(
+                        "INSERT OR REPLACE INTO visits VALUES ('pressure', '/', 20000, ?1)",
+                        [NOW],
+                    )
+                    .unwrap();
+                    age(&mut conn).unwrap();
+                    prop_assert!(all_ranks(&conn).values().all(|rank| *rank >= 1.0));
+                }
+            }
+        }
+    }
+
+    mod scores_and_list {
+        use super::*;
+
+        #[test]
+        fn scores_weight_rank_by_last_visit() {
+            let cases: [(i64, f64); 8] = [
+                (0, 4.0),
+                (3_599, 4.0),
+                (3_600, 2.0),
+                (86_399, 2.0),
+                (86_400, 0.5),
+                (604_799, 0.5),
+                (604_800, 0.25),
+                (10_000_000, 0.25),
+            ];
+            let conn = memory_db();
+            for (i, (seconds_ago, _)) in cases.iter().enumerate() {
+                insert(&conn, &format!("e{i}"), "/", 10.0, NOW - seconds_ago);
+            }
+
+            let scores = scores_at(&conn, NOW).unwrap();
+            for (i, (seconds_ago, factor)) in cases.iter().enumerate() {
+                let score = scores[&SessionName::new(&format!("e{i}"))].rank;
+                assert_eq!(score, Some(10.0 * factor), "{seconds_ago} seconds ago");
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn scores_and_list_agree(
+                entries in prop::collection::btree_map(
+                    "[a-z]{1,8}",
+                    (prop_oneof![Just(0.0), 0.0..1_000.0f64], 0..2_000_000i64),
+                    0..20,
+                ),
+            ) {
+                let conn = memory_db();
+                for (name, (rank, ago)) in &entries {
+                    insert(&conn, name, "/", *rank, NOW - ago);
+                }
+                let scores = scores_at(&conn, NOW).unwrap();
+                let listed = list(&conn, NOW).unwrap();
+                prop_assert_eq!(listed.len(), scores.len());
+                for row in &listed {
+                    let score = scores[&SessionName::new(&row.name)].rank;
+                    prop_assert_eq!(score, Some(row.score));
+                }
+            }
+
+            #[test]
+            fn list_is_sorted_by_score_then_path(
+                entries in prop::collection::btree_map(
+                    "[a-z]{1,8}",
+                    (prop_oneof![Just(0.0), 0.0..1_000.0f64], 0..2_000_000i64, "/[a-z]{1,4}"),
+                    0..20,
+                ),
+            ) {
+                let conn = memory_db();
+                for (name, (rank, ago, path)) in &entries {
+                    insert(&conn, name, path, *rank, NOW - ago);
+                }
+                let listed = list(&conn, NOW).unwrap();
+                for pair in listed.windows(2) {
+                    let (a, b) = (&pair[0], &pair[1]);
+                    prop_assert!(a.score >= b.score);
+                    if a.score.total_cmp(&b.score).is_eq() {
+                        prop_assert!(a.path <= b.path);
+                    }
+                }
+            }
+        }
+    }
+}

@@ -6,6 +6,7 @@ use crate::{
     },
 };
 use anyhow::{Context, Result, anyhow, bail};
+use core::fmt;
 use rusqlite::{Connection, ErrorCode, params};
 use std::{
     fs,
@@ -119,7 +120,7 @@ pub(crate) fn select_all(conn: &Connection) -> Result<()> {
             row.name,
             row.score,
             row.rank,
-            ago(t.saturating_sub(row.last_accessed)),
+            Time::from(t.saturating_sub(row.last_accessed)),
             tilde(&row.path, home.as_deref()),
         );
     }
@@ -163,46 +164,19 @@ fn biggest_name(rows: &[Row]) -> Result<usize> {
 
 #[derive(Debug)]
 enum Time {
-    Second(i64),
+    Second,
     Minute(i64),
     Hour(i64),
     Day(i64),
 }
 
-impl Time {
-    fn to_second(&self) -> Self {
+impl fmt::Display for Time {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Time::Second(i) => Time::Second(*i),
-            Time::Minute(i) => Time::Second(i * 60),
-            Time::Hour(i) => Time::Second(i * 3600),
-            Time::Day(i) => Time::Second(i * 86_400),
-        }
-    }
-
-    fn to_minute(&self) -> Self {
-        match self {
-            Time::Second(i) => Time::Minute(i / 60),
-            Time::Minute(i) => Time::Minute(*i),
-            Time::Hour(i) => Time::Minute(i * 60),
-            Time::Day(i) => Time::Minute(i * 1440),
-        }
-    }
-
-    fn to_hour(&self) -> Self {
-        match self {
-            Time::Second(i) => Time::Hour(i / 3600),
-            Time::Minute(i) => Time::Hour(i / 60),
-            Time::Hour(i) => Time::Hour(*i),
-            Time::Day(i) => Time::Hour(i * 24),
-        }
-    }
-
-    fn to_day(&self) -> Self {
-        match self {
-            Time::Second(i) => Time::Day(i / 86_400),
-            Time::Minute(i) => Time::Day(i / 1440),
-            Time::Hour(i) => Time::Day(i / 24),
-            Time::Day(i) => Time::Day(*i),
+            Self::Second => f.pad("just now"),
+            Self::Minute(m) => f.pad(&format!("{m}m ago")),
+            Self::Hour(h) => f.pad(&format!("{h}h ago")),
+            Self::Day(d) => f.pad(&format!("{d}d ago")),
         }
     }
 }
@@ -210,20 +184,11 @@ impl Time {
 impl From<i64> for Time {
     fn from(secs: i64) -> Self {
         match secs {
-            s if s >= 86_400 => Self::Second(s).to_day(),
-            s if s >= 3600 => Self::Second(s).to_hour(),
-            s if s >= 60 => Self::Second(s).to_minute(),
-            _ => Self::Second(secs).to_second(),
+            s if s >= 86_400 => Self::Day(s / 86_400),
+            s if s >= 3_600 => Self::Hour(s / 3_600),
+            s if s >= 60 => Self::Minute(s / 60),
+            _ => Self::Second,
         }
-    }
-}
-
-fn ago(secs: i64) -> String {
-    match Time::from(secs) {
-        Time::Second(_) => "just now".into(),
-        Time::Minute(m) => format!("{m}m ago"),
-        Time::Hour(h) => format!("{h}h ago"),
-        Time::Day(d) => format!("{d}d ago"),
     }
 }
 
@@ -738,61 +703,25 @@ mod tests {
             }
         }
 
-        fn parse(output: &str) -> Option<(i64, char)> {
-            let shown = output.strip_suffix(" ago")?;
-            let unit = shown.chars().last()?;
-            let count = shown[..shown.len() - 1].parse().ok()?;
-
-            Some((count, unit))
-        }
-
-        fn unit_seconds(unit: char) -> i64 {
-            match unit {
-                'm' => 60,
-                'h' => 3_600,
-                'd' => 86_400,
-                other => panic!("unknown unit {other}"),
-            }
-        }
-
-        fn shown_seconds(output: &str) -> i64 {
-            parse(output).map_or(0, |(count, unit)| count * unit_seconds(unit))
-        }
-
-        fn check_timeframe(secs: i64, unit: char) -> Result<(), TestCaseError> {
-            let parsed = parse(&ago(secs));
-            prop_assert!(parsed.is_some(), "{} gave no count", secs);
-            let (count, shown) = parsed.unwrap();
-            let size = unit_seconds(unit);
-            prop_assert_eq!(shown, unit);
-            prop_assert!(count * size <= secs);
-            prop_assert!(secs - count * size < size);
-
-            Ok(())
+        #[test]
+        fn from_boundaries() {
+            assert!(matches!(Time::from(i64::MIN), Time::Second));
+            assert!(matches!(Time::from(0), Time::Second));
+            assert!(matches!(Time::from(59), Time::Second));
+            assert!(matches!(Time::from(60), Time::Minute(_)));
+            assert!(matches!(Time::from(3_599), Time::Minute(_)));
+            assert!(matches!(Time::from(3_600), Time::Hour(_)));
+            assert!(matches!(Time::from(86_399), Time::Hour(_)));
+            assert!(matches!(Time::from(86_400), Time::Day(_)));
+            assert!(matches!(Time::from(i64::MAX), Time::Day(_)));
         }
 
         #[test]
-        fn extreme_values() {
-            assert_eq!(ago(i64::MIN), "just now");
-            check_timeframe(i64::MAX, 'd').unwrap();
-        }
-
-        #[test]
-        fn ago_boundaries() {
-            let cases = [
-                (0, "just now"),
-                (59, "just now"),
-                (60, "1m ago"),
-                (3_599, "59m ago"),
-                (3_600, "1h ago"),
-                (86_399, "23h ago"),
-                (86_400, "1d ago"),
-                (-59, "just now"),
-                (-3_600, "just now"),
-            ];
-            for (secs, expected) in cases {
-                assert_eq!(ago(secs), expected, "{secs} seconds");
-            }
+        fn display() {
+            assert_eq!(Time::Second.to_string(), "just now");
+            assert_eq!(Time::Minute(5).to_string(), "5m ago");
+            assert_eq!(Time::Hour(3).to_string(), "3h ago");
+            assert_eq!(Time::Day(12).to_string(), "12d ago");
         }
 
         #[test]
@@ -815,30 +744,23 @@ mod tests {
 
         proptest! {
             #[test]
-            fn under_minute_is_just_now(secs in 0..60i64) {
-                prop_assert_eq!(ago(secs), "just now");
+            fn under_minute_is_just_now(secs in i64::MIN..60i64) {
+                prop_assert!(matches!(Time::from(secs), Time::Second));
             }
 
             #[test]
-            fn ago_uses_right_timeframe(
-                (secs, unit) in prop_oneof![
-                    (60..3_600i64).prop_map(|s| (s, 'm')),
-                    (3_600..86_400i64).prop_map(|s| (s, 'h')),
-                    (86_400..i64::MAX).prop_map(|s| (s, 'd')),
-                ],
-            ) {
-                check_timeframe(secs, unit)?;
+            fn under_hour_is_minute(secs in 60..3_600i64) {
+                prop_assert!(matches!(Time::from(secs), Time::Minute(_)));
             }
 
             #[test]
-            fn future_visits_are_just_now(secs in i64::MIN..0) {
-                prop_assert_eq!(ago(secs), "just now");
+            fn under_day_is_hour(secs in 3_600..86_400i64) {
+                prop_assert!(matches!(Time::from(secs), Time::Hour(_)));
             }
 
             #[test]
-            fn longer_durations_never_look_shorter(a in any::<i64>(), b in any::<i64>()) {
-                let (shorter, longer) = (a.min(b), a.max(b));
-                prop_assert!(shown_seconds(&ago(shorter)) <= shown_seconds(&ago(longer)));
+            fn day_or_more_is_day(secs in 86_400..i64::MAX) {
+                prop_assert!(matches!(Time::from(secs), Time::Day(_)));
             }
 
             #[test]

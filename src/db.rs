@@ -39,6 +39,12 @@ pub(crate) fn open() -> Result<Connection> {
         .context("Error setting pragma update")?;
     conn.busy_timeout(std::time::Duration::from_millis(500))
         .context("Error setting busy timeout")?;
+    init(&conn)?;
+
+    Ok(conn)
+}
+
+fn init(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS visits (
             name          TEXT    PRIMARY KEY,
@@ -48,9 +54,7 @@ pub(crate) fn open() -> Result<Connection> {
         ) STRICT;",
     )
     .context("Error creating 'visits' table")?;
-    remove_stale(&conn).context("Error removing entries whose path no longer exists")?;
-
-    Ok(conn)
+    remove_stale(conn).context("Error removing entries whose path no longer exists")
 }
 
 fn remove_stale(conn: &Connection) -> Result<()> {
@@ -95,18 +99,16 @@ struct Row {
 }
 
 pub(crate) fn select_all(conn: &Connection) -> Result<()> {
-    let rows = list(conn).context("Error getting rows from frecency database")?;
+    let t = now()?;
+    let rows = list(conn, t).context("Error getting rows from frecency database")?;
     if rows.is_empty() {
         println!("The frecency database is empty.");
 
         return Ok(());
     }
 
-    let t = now()?;
     let home = dirs::home_dir();
-
     let name_size = biggest_name(&rows)?;
-
     println!(
         "{:<name_size$} | {:>7} | {:>6} | {:<10} | PATH",
         "NAME", "SCORE", "RANK", "LAST USED"
@@ -125,8 +127,7 @@ pub(crate) fn select_all(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn list(conn: &Connection) -> Result<Vec<Row>> {
-    let t = now()?;
+fn list(conn: &Connection, now: i64) -> Result<Vec<Row>> {
     let mut stmt = conn.prepare(
         "SELECT name, path, rank, last_accessed,
                 rank * CASE
@@ -138,7 +139,7 @@ fn list(conn: &Connection) -> Result<Vec<Row>> {
          FROM visits
          ORDER BY score DESC, path ASC",
     )?;
-    let rows = stmt.query_map([t], |r| {
+    let rows = stmt.query_map([now], |r| {
         Ok(Row {
             name: r.get(0)?,
             path: r.get(1)?,
@@ -303,7 +304,10 @@ pub(crate) fn age(conn: &mut Connection) -> Result<()> {
 
 /// Returns session name -> Dir (with frecency score) for all known folders.
 pub(crate) fn scores(conn: &Connection) -> Result<Dirs> {
-    let t = now()?;
+    scores_at(conn, now()?)
+}
+
+fn scores_at(conn: &Connection, now: i64) -> Result<Dirs> {
     let mut stmt = conn.prepare(
         "SELECT name, path,
                 rank * CASE
@@ -315,7 +319,7 @@ pub(crate) fn scores(conn: &Connection) -> Result<Dirs> {
          FROM visits",
     )?;
 
-    let rows = stmt.query_map([t], |r| {
+    let rows = stmt.query_map([now], |r| {
         let name: SessionName = r.get(0)?;
         let path = PathBuf::from(r.get::<_, String>(1)?);
         let score: f64 = r.get(2)?;

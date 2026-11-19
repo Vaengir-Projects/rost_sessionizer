@@ -724,4 +724,163 @@ mod tests {
             }
         }
     }
+
+    mod display {
+        use super::*;
+
+        fn row_named(name: &str) -> Row {
+            Row {
+                name: name.to_string(),
+                path: String::new(),
+                rank: 0.0,
+                last_accessed: 0,
+                score: 0.0,
+            }
+        }
+
+        fn parse(output: &str) -> Option<(i64, char)> {
+            let shown = output.strip_suffix(" ago")?;
+            let unit = shown.chars().last()?;
+            let count = shown[..shown.len() - 1].parse().ok()?;
+
+            Some((count, unit))
+        }
+
+        fn unit_seconds(unit: char) -> i64 {
+            match unit {
+                'm' => 60,
+                'h' => 3_600,
+                'd' => 86_400,
+                other => panic!("unknown unit {other}"),
+            }
+        }
+
+        fn shown_seconds(output: &str) -> i64 {
+            parse(output).map_or(0, |(count, unit)| count * unit_seconds(unit))
+        }
+
+        fn check_timeframe(secs: i64, unit: char) -> Result<(), TestCaseError> {
+            let parsed = parse(&ago(secs));
+            prop_assert!(parsed.is_some(), "{} gave no count", secs);
+            let (count, shown) = parsed.unwrap();
+            let size = unit_seconds(unit);
+            prop_assert_eq!(shown, unit);
+            prop_assert!(count * size <= secs);
+            prop_assert!(secs - count * size < size);
+
+            Ok(())
+        }
+
+        #[test]
+        fn extreme_values() {
+            assert_eq!(ago(i64::MIN), "just now");
+            check_timeframe(i64::MAX, 'd').unwrap();
+        }
+
+        #[test]
+        fn ago_boundaries() {
+            let cases = [
+                (0, "just now"),
+                (59, "just now"),
+                (60, "1m ago"),
+                (3_599, "59m ago"),
+                (3_600, "1h ago"),
+                (86_399, "23h ago"),
+                (86_400, "1d ago"),
+                (-59, "just now"),
+                (-3_600, "just now"),
+            ];
+            for (secs, expected) in cases {
+                assert_eq!(ago(secs), expected, "{secs} seconds");
+            }
+        }
+
+        #[test]
+        fn tilde_examples() {
+            let home = Path::new("/home/user");
+            assert_eq!(tilde("/home/user", Some(home)), "~");
+            assert_eq!(tilde("/home/user/code/api", Some(home)), "~/code/api");
+            assert_eq!(
+                tilde("/home/username/api", Some(home)),
+                "/home/username/api"
+            );
+            assert_eq!(tilde("/srv/api", Some(home)), "/srv/api");
+            assert_eq!(tilde("/home/user/api", None), "/home/user/api");
+        }
+
+        #[test]
+        fn biggest_name_needs_rows() {
+            assert!(biggest_name(&[]).is_err());
+        }
+
+        proptest! {
+            #[test]
+            fn under_minute_is_just_now(secs in 0..60i64) {
+                prop_assert_eq!(ago(secs), "just now");
+            }
+
+            #[test]
+            fn ago_uses_right_timeframe(
+                (secs, unit) in prop_oneof![
+                    (60..3_600i64).prop_map(|s| (s, 'm')),
+                    (3_600..86_400i64).prop_map(|s| (s, 'h')),
+                    (86_400..i64::MAX).prop_map(|s| (s, 'd')),
+                ],
+            ) {
+                check_timeframe(secs, unit)?;
+            }
+
+            #[test]
+            fn future_visits_are_just_now(secs in i64::MIN..0) {
+                prop_assert_eq!(ago(secs), "just now");
+            }
+
+            #[test]
+            fn longer_durations_never_look_shorter(a in any::<i64>(), b in any::<i64>()) {
+                let (shorter, longer) = (a.min(b), a.max(b));
+                prop_assert!(shown_seconds(&ago(shorter)) <= shown_seconds(&ago(longer)));
+            }
+
+            #[test]
+            fn tilde_shortens_paths_below_home(
+                home in prop::collection::vec("[a-z]{1,5}", 1..4),
+                rest in prop::collection::vec("[a-z]{1,5}", 1..4),
+            ) {
+                let home = PathBuf::from(format!("/{}", home.join("/")));
+                let rest = rest.join("/");
+                let path = home.join(&rest);
+                prop_assert_eq!(tilde(path.to_str().unwrap(), Some(&home)), format!("~/{rest}"));
+            }
+
+            #[test]
+            fn tilde_keeps_siblings_of_home(
+                home in prop::collection::vec("[a-z]{1,5}", 1..4),
+                suffix in "[a-z]{1,3}",
+            ) {
+                let home = format!("/{}", home.join("/"));
+                let sibling = format!("{home}{suffix}");
+                prop_assert_eq!(tilde(&sibling, Some(Path::new(&home))), sibling);
+            }
+
+            #[test]
+            fn tilde_keeps_unrelated_paths(
+                home in prop::collection::vec("[a-z]{1,5}", 1..4),
+                path in prop::collection::vec("[a-z]{1,5}", 1..6),
+            ) {
+                let home = PathBuf::from(format!("/{}", home.join("/")));
+                let path = format!("/{}", path.join("/"));
+                prop_assume!(!Path::new(&path).starts_with(&home));
+                prop_assert_eq!(tilde(&path, Some(&home)), path);
+            }
+
+            #[test]
+            fn biggest_name_is_the_longest_name_plus_three(
+                names in prop::collection::vec(any::<String>(), 1..20),
+            ) {
+                let rows: Vec<Row> = names.iter().map(|n| row_named(n)).collect();
+                let longest = names.iter().map(String::len).max().unwrap();
+                prop_assert_eq!(biggest_name(&rows).unwrap(), longest + 3);
+            }
+        }
+    }
 }

@@ -146,11 +146,7 @@ fn get_worktrees(paths: &[PathBuf]) -> Result<Dirs> {
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
-                if let ".git" = dir
-                    .file_name()
-                    .to_str()
-                    .context("Error converting filename to str")?
-                {
+                if dir.file_name() == ".git" {
                     let mut path = dir.path();
                     path.pop();
 

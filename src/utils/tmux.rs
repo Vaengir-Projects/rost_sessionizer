@@ -88,6 +88,11 @@ pub(crate) fn current_session() -> Result<SessionName> {
 
     let output = tmux_command_with_output(&["display-message", "-p", "#{session_name}"])
         .context("Error asking tmux for the current session")?;
+
+    parse_session_name(&output)
+}
+
+fn parse_session_name(output: &str) -> Result<SessionName> {
     let name = output.trim();
     if name.is_empty() {
         bail!("tmux didn't report a current session");
@@ -101,6 +106,10 @@ pub(crate) fn existing_sessions() -> Result<Vec<Dir>> {
         tmux_command_with_output(&["list-sessions", "-F", "#{session_name}:#{session_path}"])
             .context("Error listing existing tmux sessions")?;
 
+    parse_sessions(&output)
+}
+
+fn parse_sessions(output: &str) -> Result<Vec<Dir>> {
     output
         .lines()
         .map(|line| {
@@ -151,6 +160,11 @@ fn client_terminal_size() -> Result<(u16, u16)> {
     let output =
         tmux_command_with_output(&["display-message", "-p", "#{client_width}x#{client_height}"])
             .context("Error asking tmux for the client size")?;
+
+    parse_terminal_size(&output)
+}
+
+fn parse_terminal_size(output: &str) -> Result<(u16, u16)> {
     let (w, h) = output
         .trim()
         .split_once('x')

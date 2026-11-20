@@ -20,6 +20,7 @@ use clap::parser::ValuesRef;
 use std::{
     collections::HashMap,
     io::Write,
+    path::PathBuf,
     process::{Command, Stdio},
 };
 
@@ -51,13 +52,13 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
             db::scores(&conn).context("Error getting paths by frecency")
         }),
         (SearchMode::Worktrees, &|| {
-            get_worktrees().context("Error finding all worktrees")
+            get_worktrees(&config::paths()).context("Error finding all worktrees")
         }),
         (SearchMode::Repos, &|| {
-            get_repos().context("Error finding all repositories")
+            get_repos(&config::paths()).context("Error finding all repositories")
         }),
         (SearchMode::Dirs, &|| {
-            get_directories().context("Error finding all directories")
+            get_directories(&config::paths()).context("Error finding all directories")
         }),
     ];
     for (mode, load) in sources {
@@ -87,10 +88,10 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     Ok(())
 }
 
-fn get_directories() -> Result<Dirs> {
+fn get_directories(paths: &[PathBuf]) -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths and parse them.
-    config::paths().iter().try_for_each(|path| {
+    paths.iter().try_for_each(|path| {
         let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
 
         if !absolute_path.join(".git").exists() {
@@ -108,10 +109,10 @@ fn get_directories() -> Result<Dirs> {
     Ok(dirs)
 }
 
-fn get_repos() -> Result<Dirs> {
+fn get_repos(paths: &[PathBuf]) -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
     // Iterate over configured paths, check if they are git repositories and parse them.
-    config::paths().iter().try_for_each(|path| {
+    paths.iter().try_for_each(|path| {
         let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
 
         if absolute_path.join(".git").exists() {
@@ -129,10 +130,11 @@ fn get_repos() -> Result<Dirs> {
     Ok(dirs)
 }
 
-fn get_worktrees() -> Result<Dirs> {
+fn get_worktrees(paths: &[PathBuf]) -> Result<Dirs> {
     let mut dirs: Dirs = Dirs::new();
-    // Iterate over configured paths, check if they are bare git repositories, find the worktrees and parse them.
-    config::paths().iter().try_for_each(|path| {
+    // Iterate over configured paths, check if they are bare git repositories, find the worktrees
+    // and parse them.
+    paths.iter().try_for_each(|path| {
         let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
 
         let child_dirs = absolute_path.read_dir().with_context(|| {

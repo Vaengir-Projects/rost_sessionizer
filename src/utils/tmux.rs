@@ -175,3 +175,99 @@ fn parse_terminal_size(output: &str) -> Result<(u16, u16)> {
         h.parse().context("Error parsing rows")?,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::fmt::Write;
+
+    mod parse_session_name {
+        use super::*;
+
+        #[test]
+        fn rejects_empty_output() {
+            for output in ["", "\n", "  \n"] {
+                assert!(parse_session_name(output).is_err(), "{output:?}");
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn round_trip(name in "[^:.\\s]([^:.\n\r]{0,18}[^:.\\s])?") {
+                let output = format!("{name}\n");
+                let parsed = parse_session_name(&output).unwrap();
+                prop_assert_eq!(parsed.as_str(), name.as_str());
+            }
+        }
+    }
+
+    mod parse_sessions {
+        use super::*;
+
+        #[test]
+        fn empty_output_no_sessions() {
+            assert_eq!(parse_sessions("").unwrap(), []);
+        }
+
+        #[test]
+        fn first_colon_separates_name_and_path() {
+            let sessions = parse_sessions("repo:/home/user/a:b\n").unwrap();
+            assert_eq!(sessions[0].name.as_str(), "repo");
+            assert_eq!(sessions[0].path, PathBuf::from("/home/user/a:b"));
+        }
+
+        #[test]
+        fn rejects_lines_without_colon() {
+            let error = parse_sessions("repo\n").unwrap_err();
+            assert!(error.to_string().contains("'repo'"));
+        }
+
+        proptest! {
+            #[test]
+            fn round_trip(
+                sessions in prop::collection::vec(("[^:.\n\r]{1,20}", "/[^\n\r]{0,30}"), 0..10),
+            ) {
+                let output: String = sessions
+                    .iter()
+                    .fold(String::new(), |mut output, (name, path)| {
+                        let _ = writeln!(output, "{name}:{path}");
+                        output
+                    });
+                let parsed = parse_sessions(&output).unwrap();
+                prop_assert_eq!(parsed.len(), sessions.len());
+                for (dir, (name, path)) in parsed.iter().zip(&sessions) {
+                    prop_assert_eq!(dir.name.as_str(), name.as_str());
+                    prop_assert_eq!(&dir.path, &PathBuf::from(path));
+                    prop_assert!(dir.has_session);
+                }
+            }
+        }
+    }
+
+    mod parse_terminal_size {
+        use super::*;
+
+        #[test]
+        fn rejects_malformed_output() {
+            for output in [
+                "", "x", "80", "80x", "x24", "-1x24", "70000x24", "80x24x1", "abcxdef",
+            ] {
+                assert!(parse_terminal_size(output).is_err(), "{output:?}");
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn round_trip(width in any::<u16>(), height in any::<u16>()) {
+                let output = format!("{width}x{height}\n");
+                prop_assert_eq!(parse_terminal_size(&output).unwrap(), (width, height));
+            }
+
+            #[test]
+            fn never_panics(output in any::<String>()) {
+                let _ = parse_terminal_size(&output);
+            }
+        }
+    }
+}

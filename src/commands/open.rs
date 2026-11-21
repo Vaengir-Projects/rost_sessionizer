@@ -20,7 +20,6 @@ use clap::parser::ValuesRef;
 use std::{
     collections::HashMap,
     io::Write,
-    path::PathBuf,
     process::{Command, Stdio},
 };
 
@@ -46,20 +45,29 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     // Open connection to frecency database
     let mut conn = db::open().context("Error getting database conntection")?;
 
+    let mut warnings = Vec::new();
+    let entries = config::paths().unwrap_or_else(|error| {
+        warnings.push(format!("{error:#}"));
+        Vec::new()
+    });
+    let mut configured_dirs = Vec::new();
+    for entry in entries {
+        match Dir::configured(&entry) {
+            Ok(dir) => configured_dirs.push(dir),
+            Err(error) => warnings.push(format!("{error:#}")),
+        }
+    }
+
     let search_modes: Vec<SearchMode> = search_modes.copied().collect();
     let sources: [(SearchMode, &dyn Fn() -> Result<Dirs>); 4] = [
         (SearchMode::Frecency, &|| {
             db::scores(&conn).context("Error getting paths by frecency")
         }),
         (SearchMode::Worktrees, &|| {
-            get_worktrees(&config::paths()).context("Error finding all worktrees")
+            get_worktrees(&configured_dirs).context("Error finding all worktrees")
         }),
-        (SearchMode::Repos, &|| {
-            get_repos(&config::paths()).context("Error finding all repositories")
-        }),
-        (SearchMode::Dirs, &|| {
-            get_directories(&config::paths()).context("Error finding all directories")
-        }),
+        (SearchMode::Repos, &|| Ok(get_repos(&configured_dirs))),
+        (SearchMode::Dirs, &|| Ok(get_directories(&configured_dirs))),
     ];
     for (mode, load) in sources {
         if search_modes.contains(&SearchMode::All) || search_modes.contains(&mode) {
@@ -67,7 +75,7 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
         }
     }
 
-    let Some(selected) = select_via_fzf(&possible_selections.sort())
+    let Some(selected) = select_via_fzf(&possible_selections.sort(), &warnings)
         .context("Error selecting new or existing session")?
     else {
         return Ok(());
@@ -88,74 +96,42 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     Ok(())
 }
 
-fn get_directories(paths: &[PathBuf]) -> Result<Dirs> {
-    let mut dirs: Dirs = Dirs::new();
-    // Iterate over configured paths and parse them.
-    paths.iter().try_for_each(|path| {
-        let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
-
-        if !absolute_path.join(".git").exists() {
-            let name = absolute_path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
-            dirs.try_insert_dir(Dir::from((SessionName::new(&name), absolute_path, None)));
+fn get_directories(configured_dirs: &[Dir]) -> Dirs {
+    let mut dirs = Dirs::new();
+    for dir in configured_dirs {
+        if !dir.path.join(".git").exists() {
+            dirs.try_insert_dir(dir.clone());
         }
+    }
 
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    Ok(dirs)
+    dirs
 }
 
-fn get_repos(paths: &[PathBuf]) -> Result<Dirs> {
-    let mut dirs: Dirs = Dirs::new();
-    // Iterate over configured paths, check if they are git repositories and parse them.
-    paths.iter().try_for_each(|path| {
-        let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
-
-        if absolute_path.join(".git").exists() {
-            let name = absolute_path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
-            dirs.try_insert_dir(Dir::from((SessionName::new(&name), absolute_path, None)));
+fn get_repos(configured_dirs: &[Dir]) -> Dirs {
+    let mut dirs = Dirs::new();
+    for dir in configured_dirs {
+        if dir.path.join(".git").exists() {
+            dirs.try_insert_dir(dir.clone());
         }
+    }
 
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    Ok(dirs)
+    dirs
 }
 
-fn get_worktrees(paths: &[PathBuf]) -> Result<Dirs> {
-    let mut dirs: Dirs = Dirs::new();
-    // Iterate over configured paths, check if they are bare git repositories, find the worktrees
-    // and parse them.
-    paths.iter().try_for_each(|path| {
-        let absolute_path = path.canonicalize().context("Error canonicalizing path")?;
-
-        let child_dirs = absolute_path.read_dir().with_context(|| {
+fn get_worktrees(configured_dirs: &[Dir]) -> Result<Dirs> {
+    let mut dirs = Dirs::new();
+    for configured_dir in configured_dirs {
+        let child_dirs = configured_dir.path.read_dir().with_context(|| {
             format!(
                 "Couldn't get the child directories of {}",
-                absolute_path.display()
+                configured_dir.path.display()
             )
         })?;
         for child_dir in child_dirs {
             let dir = child_dir.context("Child directory has an error")?;
             if dir.file_type()?.is_dir() {
                 if dir.file_name() == ".git" {
-                    let mut path = dir.path();
-                    path.pop();
-
-                    let name = path.file_name().unwrap().to_string_lossy().to_string();
-                    dirs.try_insert_dir(Dir::from((
-                        SessionName::new(&name),
-                        path.canonicalize().context("Error canonicalizing path")?,
-                        None,
-                    )));
+                    dirs.try_insert_dir(configured_dir.clone());
                 } else {
                     let path = dir.path().join(".git");
                     if path.try_exists()? {
@@ -184,9 +160,7 @@ fn get_worktrees(paths: &[PathBuf]) -> Result<Dirs> {
                 }
             }
         }
-
-        Ok::<_, anyhow::Error>(())
-    })?;
+    }
 
     Ok(dirs)
 }
@@ -200,15 +174,19 @@ const FZF_INTERRUPTED: i32 = 130;
 ///
 /// Returns `io::Error` if the fzf or any of the tmux commands fail, or
 /// `anyhow::Error` if anything with stdin or stdout fails.
-fn select_via_fzf(possible_selections: &[Dir]) -> Result<Option<Dir>> {
-    let mut child = Command::new("fzf")
-        .args([
-            "--margin=5%",
-            "--padding=2%",
-            "--border",
-            "--ansi",
-            "--tiebreak=index",
-        ])
+fn select_via_fzf(possible_selections: &[Dir], warnings: &[String]) -> Result<Option<Dir>> {
+    let mut command = Command::new("fzf");
+    command.args([
+        "--margin=5%",
+        "--padding=2%",
+        "--border",
+        "--ansi",
+        "--tiebreak=index",
+    ]);
+    if !warnings.is_empty() {
+        command.args(["--footer", &warnings.join("\n")]);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -252,7 +230,7 @@ mod tests {
     use std::{
         collections::{BTreeMap, BTreeSet},
         fs,
-        path::Path,
+        path::{Path, PathBuf},
     };
     use tempfile::TempDir;
     use test_strategy::{Arbitrary, proptest};
@@ -279,11 +257,11 @@ mod tests {
         }
     }
 
-    fn create_all(root: &Path, entries: &BTreeMap<String, Kind>) -> Vec<PathBuf> {
+    fn create_all(parent: &Path, entries: &BTreeMap<String, Kind>) -> Vec<PathBuf> {
         entries
             .iter()
             .map(|(name, kind)| {
-                let path = root.join(name);
+                let path = parent.join(name);
                 create(&path, *kind);
                 path
             })
@@ -302,37 +280,23 @@ mod tests {
             create(&plain, Kind::Plain);
             create(&repo, Kind::RepoDir);
             create(&worktree, Kind::RepoFile);
-            let paths = [plain, repo, worktree];
+            let configured_dirs =
+                [plain, repo, worktree].map(|path| Dir::configured(&path).unwrap());
 
             assert_eq!(
-                get_directories(&paths)
-                    .unwrap()
+                get_directories(&configured_dirs)
                     .keys()
                     .map(ToString::to_string)
                     .collect::<BTreeSet<_>>(),
                 BTreeSet::from(["plain".to_owned()])
             );
             assert_eq!(
-                get_repos(&paths)
-                    .unwrap()
+                get_repos(&configured_dirs)
                     .keys()
                     .map(ToString::to_string)
                     .collect::<BTreeSet<_>>(),
                 BTreeSet::from(["repo".to_owned(), "worktree".to_owned()])
             );
-        }
-
-        #[test]
-        fn entries_use_canonical_path_and_sanitized_name() {
-            let tmp = TempDir::new().unwrap();
-            let target = tmp.path().join("symbols-outline.nvim");
-            create(&target, Kind::Plain);
-            create(&tmp.path().join("other"), Kind::Plain);
-
-            let configured = tmp.path().join("other/../symbols-outline.nvim");
-            let found = get_directories(&[configured]).unwrap();
-            let entry = &found[&SessionName::new("symbols-outline_nvim")];
-            assert_eq!(entry.path, target.canonicalize().unwrap());
         }
 
         #[test]
@@ -343,18 +307,13 @@ mod tests {
             create(&work, Kind::Plain);
             create(&personal, Kind::Plain);
 
-            let found = get_directories(&[work.clone(), personal]).unwrap();
+            let configured_dirs = [&work, &personal].map(|path| Dir::configured(path).unwrap());
+            let found = get_directories(&configured_dirs);
             assert_eq!(found.len(), 1);
             assert_eq!(
                 found[&SessionName::new("api")].path,
                 work.canonicalize().unwrap()
             );
-        }
-
-        #[test]
-        fn missing_path_errors() {
-            let tmp = TempDir::new().unwrap();
-            assert!(get_directories(&[tmp.path().join("missing")]).is_err());
         }
 
         #[proptest(cases = 32)]
@@ -363,7 +322,10 @@ mod tests {
             entries: BTreeMap<String, Kind>,
         ) {
             let tmp = TempDir::new().unwrap();
-            let paths = create_all(tmp.path(), &entries);
+            let configured_dirs: Vec<Dir> = create_all(tmp.path(), &entries)
+                .iter()
+                .map(|path| Dir::configured(path).unwrap())
+                .collect();
             let plain: BTreeSet<String> = entries
                 .iter()
                 .filter(|(_, kind)| !kind.is_repo())
@@ -375,16 +337,14 @@ mod tests {
                 .map(|(name, _)| name.clone())
                 .collect();
             prop_assert_eq!(
-                get_directories(&paths)
-                    .unwrap()
+                get_directories(&configured_dirs)
                     .keys()
                     .map(ToString::to_string)
                     .collect::<BTreeSet<_>>(),
                 plain
             );
             prop_assert_eq!(
-                get_repos(&paths)
-                    .unwrap()
+                get_repos(&configured_dirs)
                     .keys()
                     .map(ToString::to_string)
                     .collect::<BTreeSet<_>>(),
@@ -406,7 +366,7 @@ mod tests {
             create(&project.join("notes"), Kind::Plain);
             fs::write(project.join("readme"), "").unwrap();
 
-            let found = get_worktrees(std::slice::from_ref(&project)).unwrap();
+            let found = get_worktrees(&[Dir::configured(&project).unwrap()]).unwrap();
             assert_eq!(
                 found
                     .keys()
@@ -434,19 +394,19 @@ mod tests {
             create(&project, Kind::RepoDir);
             create(&project.join(OsStr::from_bytes(b"caf\xe9")), Kind::Plain);
 
-            let found = get_worktrees(&[project]).unwrap();
+            let found = get_worktrees(&[Dir::configured(&project).unwrap()]).unwrap();
             assert!(found.contains_key(&SessionName::new("project")));
         }
 
         #[proptest(cases = 32)]
         fn children_with_dot_git(
-            #[any] root: Kind,
+            #[any] project_kind: Kind,
             #[strategy(prop::collection::btree_map("[a-z]{1,8}", any::<Kind>(), 0..8))]
             children: BTreeMap<String, Kind>,
         ) {
             let tmp = TempDir::new().unwrap();
             let project = tmp.path().join("project");
-            create(&project, root);
+            create(&project, project_kind);
             create_all(&project, &children);
 
             let mut expected: BTreeSet<_> = children
@@ -454,11 +414,11 @@ mod tests {
                 .filter(|(_, kind)| kind.is_repo())
                 .map(|(name, _)| format!("project/{name}"))
                 .collect();
-            if matches!(root, Kind::RepoDir) {
+            if matches!(project_kind, Kind::RepoDir) {
                 expected.insert("project".to_owned());
             }
             prop_assert_eq!(
-                get_worktrees(&[project])
+                get_worktrees(&[Dir::configured(&project).unwrap()])
                     .unwrap()
                     .keys()
                     .map(ToString::to_string)

@@ -1,4 +1,5 @@
 use crate::utils::types::session_name::SessionName;
+use anyhow::{Context, Result};
 use std::{env, path::PathBuf};
 
 pub(crate) fn default_session() -> SessionName {
@@ -7,9 +8,8 @@ pub(crate) fn default_session() -> SessionName {
     SessionName::new(&raw)
 }
 
-pub(crate) fn paths() -> Vec<PathBuf> {
-    match env::var_os("SESSIONIZER_PATHS") {
-        Some(paths) => env::split_paths(&paths).collect(),
-        None => panic!("No PATHS configured"),
-    }
+pub(crate) fn paths() -> Result<Vec<PathBuf>> {
+    let paths = env::var_os("SESSIONIZER_PATHS").context("SESSIONIZER_PATHS is not set")?;
+
+    Ok(env::split_paths(&paths).collect())
 }

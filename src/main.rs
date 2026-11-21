@@ -7,9 +7,12 @@
 
 use anyhow::{Context, Result};
 use clap_complete::Shell;
-use rost_sessionizer::commands::{
-    cli::{SearchMode, build_cli, print_completions},
-    frecency, kill, open, startup,
+use rost_sessionizer::{
+    commands::{
+        cli::{SearchMode, build_cli, print_completions},
+        frecency, kill, open, startup,
+    },
+    config,
 };
 
 fn main() -> Result<()> {
@@ -20,6 +23,8 @@ fn main() -> Result<()> {
         eprintln!("Generating completion file for {generator}...");
         print_completions(generator, &mut cmd);
     }
+
+    config::init().context("Error loading the configuration")?;
 
     match args.subcommand() {
         Some(("open", sub_matches)) => {

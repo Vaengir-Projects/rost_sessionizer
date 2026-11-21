@@ -46,13 +46,14 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
     let mut conn = db::open().context("Error getting database conntection")?;
 
     let mut warnings = Vec::new();
-    let entries = config::paths().unwrap_or_else(|error| {
-        warnings.push(format!("{error:#}"));
-        Vec::new()
-    });
+    if config::paths().is_empty() {
+        warnings.push(
+            "No paths configured: set SESSIONIZER_PATHS or paths in $XDG_CONFIG_HOME/rost_sessionizer/config.toml"
+            .to_owned());
+    }
     let mut configured_dirs = Vec::new();
-    for entry in entries {
-        match Dir::configured(&entry) {
+    for entry in config::paths() {
+        match Dir::configured(entry) {
             Ok(dir) => configured_dirs.push(dir),
             Err(error) => warnings.push(format!("{error:#}")),
         }

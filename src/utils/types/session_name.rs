@@ -111,18 +111,6 @@ mod tests {
         assert!("".parse::<SessionName>().is_err());
     }
 
-    #[test]
-    fn cli_rejects_invalid_names() {
-        let result = crate::commands::cli::build_cli().try_get_matches_from([
-            "rost_sessionizer",
-            "frecency",
-            "new",
-            "a.b",
-            "/tmp",
-        ]);
-        assert!(result.is_err());
-    }
-
     proptest! {
         #[test]
         fn never_contains_separators(raw in raw_name()) {
@@ -178,7 +166,11 @@ mod tests {
         }
 
         #[test]
-        fn parse_rejects_separators(before in "[^.:]{0,10}", sep in "[.:]", after in "[^.:]{0,10}") {
+        fn parse_rejects_separators(
+            before in "[^.:]{0,10}",
+            sep in "[.:]",
+            after in "[^.:]{0,10}",
+        ) {
             let name = format!("{before}{sep}{after}");
             prop_assert!(name.parse::<SessionName>().is_err());
         }

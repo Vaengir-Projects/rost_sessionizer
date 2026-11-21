@@ -13,13 +13,6 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: daily
-        update-types:
-          - "version-update:semver-patch"
-          - "version-update:semver-minor"
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
       interval: weekly
     groups:
       cargo:

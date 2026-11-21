@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / nightly
     env:
-      // On daily scheduled runs up the proptest cases
+      # On daily scheduled runs up the proptest cases
       PROPTEST_CASES: ${{ github.event_name == 'schedule' && '4096' || '256' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1

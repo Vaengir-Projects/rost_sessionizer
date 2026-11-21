@@ -88,6 +88,11 @@ pub(crate) fn current_session() -> Result<SessionName> {
 
     let output = tmux_command_with_output(&["display-message", "-p", "#{session_name}"])
         .context("Error asking tmux for the current session")?;
+
+    parse_session_name(&output)
+}
+
+fn parse_session_name(output: &str) -> Result<SessionName> {
     let name = output.trim();
     if name.is_empty() {
         bail!("tmux didn't report a current session");
@@ -101,6 +106,10 @@ pub(crate) fn existing_sessions() -> Result<Vec<Dir>> {
         tmux_command_with_output(&["list-sessions", "-F", "#{session_name}:#{session_path}"])
             .context("Error listing existing tmux sessions")?;
 
+    parse_sessions(&output)
+}
+
+fn parse_sessions(output: &str) -> Result<Vec<Dir>> {
     output
         .lines()
         .map(|line| {
@@ -151,6 +160,11 @@ fn client_terminal_size() -> Result<(u16, u16)> {
     let output =
         tmux_command_with_output(&["display-message", "-p", "#{client_width}x#{client_height}"])
             .context("Error asking tmux for the client size")?;
+
+    parse_terminal_size(&output)
+}
+
+fn parse_terminal_size(output: &str) -> Result<(u16, u16)> {
     let (w, h) = output
         .trim()
         .split_once('x')
@@ -160,4 +174,94 @@ fn client_terminal_size() -> Result<(u16, u16)> {
         w.parse().context("Error parsing cols")?,
         h.parse().context("Error parsing rows")?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::fmt::Write;
+    use test_strategy::proptest;
+
+    mod parse_session_name {
+        use super::*;
+
+        #[test]
+        fn rejects_empty_output() {
+            for output in ["", "\n", "  \n"] {
+                assert!(parse_session_name(output).is_err(), "{output:?}");
+            }
+        }
+
+        #[proptest]
+        fn round_trip(#[strategy("[^:.\\s]([^:.\n\r]{0,18}[^:.\\s])?")] name: String) {
+            let output = format!("{name}\n");
+            let parsed = parse_session_name(&output).unwrap();
+            prop_assert_eq!(parsed.as_str(), name.as_str());
+        }
+    }
+
+    mod parse_sessions {
+        use super::*;
+
+        #[test]
+        fn empty_output_no_sessions() {
+            assert_eq!(parse_sessions("").unwrap(), []);
+        }
+
+        #[test]
+        fn first_colon_separates_name_and_path() {
+            let sessions = parse_sessions("repo:/home/user/a:b\n").unwrap();
+            assert_eq!(sessions[0].name.as_str(), "repo");
+            assert_eq!(sessions[0].path, PathBuf::from("/home/user/a:b"));
+        }
+
+        #[test]
+        fn rejects_lines_without_colon() {
+            let error = parse_sessions("repo\n").unwrap_err();
+            assert!(error.to_string().contains("'repo'"));
+        }
+
+        #[proptest]
+        fn round_trip(
+            #[strategy(prop::collection::vec(("[^:.\n\r]{1,20}", "/[^\n\r]{0,30}"), 0..10))]
+            sessions: Vec<(String, String)>,
+        ) {
+            let mut output = String::new();
+            for (name, path) in &sessions {
+                writeln!(output, "{name}:{path}").unwrap();
+            }
+            let parsed = parse_sessions(&output).unwrap();
+            prop_assert_eq!(parsed.len(), sessions.len());
+            for (dir, (name, path)) in parsed.iter().zip(&sessions) {
+                prop_assert_eq!(dir.name.as_str(), name.as_str());
+                prop_assert_eq!(&dir.path, &PathBuf::from(path));
+                prop_assert!(dir.has_session);
+            }
+        }
+    }
+
+    mod parse_terminal_size {
+        use super::*;
+
+        #[test]
+        fn rejects_malformed_output() {
+            for output in [
+                "", "x", "80", "80x", "x24", "-1x24", "70000x24", "80x24x1", "abcxdef",
+            ] {
+                assert!(parse_terminal_size(output).is_err(), "{output:?}");
+            }
+        }
+
+        #[proptest]
+        fn round_trip(#[any] width: u16, #[any] height: u16) {
+            let output = format!("{width}x{height}\n");
+            prop_assert_eq!(parse_terminal_size(&output).unwrap(), (width, height));
+        }
+
+        #[proptest]
+        fn never_panics(#[any] output: String) {
+            let _ = parse_terminal_size(&output);
+        }
+    }
 }

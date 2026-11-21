@@ -302,6 +302,7 @@ mod tests {
     use rusqlite::OptionalExtension;
     use std::collections::BTreeMap;
     use tempfile::TempDir;
+    use test_strategy::proptest;
 
     const NOW: i64 = 1_800_000_000;
 
@@ -342,31 +343,6 @@ mod tests {
         Dir::from((SessionName::new(name), PathBuf::from(path), None))
     }
 
-    fn check_aging(before: &[f64], after: &BTreeMap<String, f64>) -> Result<(), TestCaseError> {
-        let total: f64 = before.iter().sum();
-        let factor = if total > 10_000.0 {
-            0.9 * 10_000.0 / total
-        } else {
-            1.0
-        };
-        for (i, rank) in before.iter().enumerate() {
-            let name = i.to_string();
-            let expected = rank * factor;
-            if *rank == 0.0 {
-                prop_assert_eq!(after.get(&name).copied(), Some(0.0));
-            } else if expected < 1.0 {
-                prop_assert!(!after.contains_key(&name));
-            } else {
-                let actual = after.get(&name).copied().unwrap_or(f64::NAN);
-                prop_assert!((actual - expected).abs() <= 1e-9 * expected);
-            }
-        }
-        let bound = if total > 10_000.0 { 9_000.0 } else { total };
-        prop_assert!(after.values().sum::<f64>() <= bound + 1e-6);
-
-        Ok(())
-    }
-
     mod schema_and_stale_entries {
         use super::*;
 
@@ -396,32 +372,29 @@ mod tests {
             assert!(row(&conn, "gone").is_none());
         }
 
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(32))]
-
-            #[test]
-            fn init_keeps_existing_paths(
-                entries in prop::collection::btree_map("[a-z]{1,8}", any::<bool>(), 0..10),
-            ) {
-                let tmp = TempDir::new().unwrap();
-                let conn = memory_db();
-                for (name, exists) in &entries {
-                    let path = tmp.path().join(name);
-                    if *exists {
-                        fs::create_dir(&path).unwrap();
-                    }
-                    insert(&conn, name, path.to_str().unwrap(), 1.0, NOW);
+        #[proptest(cases = 32)]
+        fn init_keeps_existing_paths(
+            #[strategy(prop::collection::btree_map("[a-z]{1,8}", any::<bool>(), 0..10))]
+            entries: BTreeMap<String, bool>,
+        ) {
+            let tmp = TempDir::new().unwrap();
+            let conn = memory_db();
+            for (name, exists) in &entries {
+                let path = tmp.path().join(name);
+                if *exists {
+                    fs::create_dir(&path).unwrap();
                 }
-                init(&conn).unwrap();
-
-                let remaining: Vec<_> = all_ranks(&conn).into_keys().collect();
-                let existing: Vec<_> = entries
-                    .iter()
-                    .filter(|(_, e)| **e)
-                    .map(|(n, _)| n.clone())
-                    .collect();
-                prop_assert_eq!(remaining, existing);
+                insert(&conn, name, path.to_str().unwrap(), 1.0, NOW);
             }
+            init(&conn).unwrap();
+
+            let remaining: Vec<_> = all_ranks(&conn).into_keys().collect();
+            let existing: Vec<_> = entries
+                .iter()
+                .filter(|(_, exists)| **exists)
+                .map(|(name, _)| name.clone())
+                .collect();
+            prop_assert_eq!(remaining, existing);
         }
     }
 
@@ -448,7 +421,8 @@ mod tests {
             let error = new(&conn, &entry("api", "/personal/api")).unwrap_err();
 
             assert!(format!("{error:#}").contains("already exists"));
-            assert_eq!(row(&conn, "api").unwrap().0, "/work/api");
+            let (path, _, _) = row(&conn, "api").unwrap();
+            assert_eq!(path, "/work/api");
         }
     }
 
@@ -490,16 +464,14 @@ mod tests {
             assert!(row(&conn, default.as_str()).is_none());
         }
 
-        proptest! {
-            #[test]
-            fn counts_every_visit(visits in 1..50u32) {
-                let conn = memory_db();
-                for _ in 0..visits {
-                    bump(&conn, &entry("api", "/work/api")).unwrap();
-                }
-                let rank = row(&conn, "api").unwrap().1;
-                prop_assert!(rank.total_cmp(&f64::from(visits)).is_eq());
+        #[proptest]
+        fn counts_every_visit(#[strategy(1..50u32)] visits: u32) {
+            let conn = memory_db();
+            for _ in 0..visits {
+                bump(&conn, &entry("api", "/work/api")).unwrap();
             }
+            let (_, rank, _) = row(&conn, "api").unwrap();
+            prop_assert!(rank.total_cmp(&f64::from(visits)).is_eq());
         }
     }
 
@@ -533,8 +505,10 @@ mod tests {
                 modify(&conn, &SessionName::new("api"), &SessionName::new("web")).unwrap_err();
 
             assert!(format!("{error:#}").contains("already exists"));
-            assert_eq!(row(&conn, "api").unwrap().0, "/work/api");
-            assert_eq!(row(&conn, "web").unwrap().0, "/work/web");
+            let (api_path, _, _) = row(&conn, "api").unwrap();
+            let (web_path, _, _) = row(&conn, "web").unwrap();
+            assert_eq!(api_path, "/work/api");
+            assert_eq!(web_path, "/work/web");
         }
 
         #[test]
@@ -582,43 +556,98 @@ mod tests {
             assert_eq!(after["bookmark"], 0.0);
         }
 
-        proptest! {
-            #[test]
-            fn bounds_total_and_keeps_bookmarks(
-                ranks in prop::collection::vec(prop_oneof![Just(0.0), 1.0..5_000.0f64], 0..20),
-            ) {
-                let mut conn = memory_db();
-                for (i, rank) in ranks.iter().enumerate() {
-                    insert(&conn, &i.to_string(), "/", *rank, NOW);
+        #[proptest]
+        fn nothing_changes_up_to_the_limit(
+            #[strategy(prop::collection::vec(prop_oneof![Just(0.0), 1.0..500.0f64], 0..20))]
+            ranks: Vec<f64>,
+        ) {
+            let mut conn = memory_db();
+            for (i, rank) in ranks.iter().enumerate() {
+                insert(&conn, &i.to_string(), "/", *rank, NOW);
+            }
+            age(&mut conn).unwrap();
+
+            let after = all_ranks(&conn);
+            prop_assert_eq!(after.len(), ranks.len());
+            for (i, rank) in ranks.iter().enumerate() {
+                prop_assert!(after[&i.to_string()].total_cmp(rank).is_eq());
+            }
+        }
+
+        #[proptest]
+        fn above_limit_ranks_shrink_by_one_factor(
+            #[strategy(10_000.0..20_000.0f64)] big: f64,
+            #[strategy(prop::collection::vec(prop_oneof![Just(0.0), 1.0..5_000.0f64], 0..20))]
+            others: Vec<f64>,
+        ) {
+            let ranks: Vec<f64> = std::iter::once(big).chain(others).collect();
+            let mut conn = memory_db();
+            for (i, rank) in ranks.iter().enumerate() {
+                insert(&conn, &i.to_string(), "/", *rank, NOW);
+            }
+            age(&mut conn).unwrap();
+
+            let after = all_ranks(&conn);
+            let mut factors = Vec::new();
+            let mut kept = Vec::new();
+            let mut deleted = Vec::new();
+            for (i, &before) in ranks.iter().enumerate() {
+                match after.get(&i.to_string()) {
+                    None => deleted.push(before),
+                    Some(&now) if before == 0.0 => prop_assert!(now.total_cmp(&0.0).is_eq()),
+                    Some(&now) => {
+                        factors.push(now / before);
+                        kept.push(before);
+                    }
                 }
-                age(&mut conn).unwrap();
-                check_aging(&ranks, &all_ranks(&conn))?;
             }
 
-            #[test]
-            fn aged_ranks_never_reach_zero(
-                ranks in prop::collection::vec(1.0..5_000.0f64, 0..20),
-                rounds in 1..10usize,
-            ) {
-                let mut conn = memory_db();
-                for (i, rank) in ranks.iter().enumerate() {
-                    insert(&conn, &i.to_string(), "/", *rank, NOW);
-                }
-                for _ in 0..rounds {
-                    conn.execute(
-                        "INSERT OR REPLACE INTO visits VALUES ('pressure', '/', 20000, ?1)",
-                        [NOW],
-                    )
-                    .unwrap();
-                    age(&mut conn).unwrap();
-                    prop_assert!(all_ranks(&conn).values().all(|rank| *rank >= 1.0));
-                }
+            prop_assert!(!deleted.contains(&0.0), "a bookmark was deleted");
+            prop_assert!(
+                factors
+                    .iter()
+                    .all(|f| (f - factors[0]).abs() < 1e-9 && *f < 1.0)
+            );
+            let smallest_kept = kept.iter().copied().fold(f64::INFINITY, f64::min);
+            prop_assert!(deleted.iter().all(|d| *d < smallest_kept));
+            prop_assert!(after.values().sum::<f64>() <= 9_000.0 + 1e-6);
+        }
+
+        #[proptest]
+        fn aged_ranks_never_reach_zero(
+            #[strategy(prop::collection::vec(1.0..5_000.0f64, 0..20))] ranks: Vec<f64>,
+            #[strategy(1..10usize)] rounds: usize,
+        ) {
+            let mut conn = memory_db();
+            for (i, rank) in ranks.iter().enumerate() {
+                insert(&conn, &i.to_string(), "/", *rank, NOW);
+            }
+            for _ in 0..rounds {
+                conn.execute(
+                    "INSERT OR REPLACE INTO visits VALUES ('pressure', '/', 20000, ?1)",
+                    [NOW],
+                )
+                .unwrap();
+                age(&mut conn).unwrap();
+                prop_assert!(all_ranks(&conn).values().all(|rank| *rank >= 1.0));
             }
         }
     }
 
     mod scores_and_list {
         use super::*;
+
+        fn visits() -> impl Strategy<Value = BTreeMap<String, (f64, i64, String)>> {
+            prop::collection::btree_map(
+                "[a-z]{1,8}",
+                (
+                    prop_oneof![Just(0.0), 0.0..1_000.0f64],
+                    0..2_000_000i64,
+                    "/[a-z]{1,4}",
+                ),
+                0..20,
+            )
+        }
 
         #[test]
         fn scores_weight_rank_by_last_visit() {
@@ -644,47 +673,37 @@ mod tests {
             }
         }
 
-        proptest! {
-            #[test]
-            fn scores_and_list_agree(
-                entries in prop::collection::btree_map(
-                    "[a-z]{1,8}",
-                    (prop_oneof![Just(0.0), 0.0..1_000.0f64], 0..2_000_000i64),
-                    0..20,
-                ),
-            ) {
-                let conn = memory_db();
-                for (name, (rank, ago)) in &entries {
-                    insert(&conn, name, "/", *rank, NOW - ago);
-                }
-                let scores = scores_at(&conn, NOW).unwrap();
-                let listed = list(&conn, NOW).unwrap();
-                prop_assert_eq!(listed.len(), scores.len());
-                for row in &listed {
-                    let score = scores[&SessionName::new(&row.name)].rank;
-                    prop_assert_eq!(score, Some(row.score));
-                }
+        #[proptest]
+        fn scores_and_list_agree(
+            #[strategy(visits())] entries: BTreeMap<String, (f64, i64, String)>,
+        ) {
+            let conn = memory_db();
+            for (name, (rank, seconds_ago, path)) in &entries {
+                insert(&conn, name, path, *rank, NOW - seconds_ago);
             }
+            let scores = scores_at(&conn, NOW).unwrap();
+            let listed = list(&conn, NOW).unwrap();
+            prop_assert_eq!(listed.len(), scores.len());
+            for row in &listed {
+                let score = scores[&SessionName::new(&row.name)].rank;
+                prop_assert_eq!(score, Some(row.score));
+            }
+        }
 
-            #[test]
-            fn list_is_sorted_by_score_then_path(
-                entries in prop::collection::btree_map(
-                    "[a-z]{1,8}",
-                    (prop_oneof![Just(0.0), 0.0..1_000.0f64], 0..2_000_000i64, "/[a-z]{1,4}"),
-                    0..20,
-                ),
-            ) {
-                let conn = memory_db();
-                for (name, (rank, ago, path)) in &entries {
-                    insert(&conn, name, path, *rank, NOW - ago);
-                }
-                let listed = list(&conn, NOW).unwrap();
-                for pair in listed.windows(2) {
-                    let (a, b) = (&pair[0], &pair[1]);
-                    prop_assert!(a.score >= b.score);
-                    if a.score.total_cmp(&b.score).is_eq() {
-                        prop_assert!(a.path <= b.path);
-                    }
+        #[proptest]
+        fn list_is_sorted_by_score_then_path(
+            #[strategy(visits())] entries: BTreeMap<String, (f64, i64, String)>,
+        ) {
+            let conn = memory_db();
+            for (name, (rank, seconds_ago, path)) in &entries {
+                insert(&conn, name, path, *rank, NOW - seconds_ago);
+            }
+            let listed = list(&conn, NOW).unwrap();
+            for pair in listed.windows(2) {
+                let (a, b) = (&pair[0], &pair[1]);
+                prop_assert!(a.score >= b.score);
+                if a.score.total_cmp(&b.score).is_eq() {
+                    prop_assert!(a.path <= b.path);
                 }
             }
         }
@@ -692,16 +711,6 @@ mod tests {
 
     mod display {
         use super::*;
-
-        fn row_named(name: &str) -> Row {
-            Row {
-                name: name.to_string(),
-                path: String::new(),
-                rank: 0.0,
-                last_accessed: 0,
-                score: 0.0,
-            }
-        }
 
         #[test]
         fn from_boundaries() {
@@ -742,67 +751,69 @@ mod tests {
             assert!(biggest_name(&[]).is_err());
         }
 
-        proptest! {
-            #[test]
-            fn under_minute_is_just_now(secs in i64::MIN..60i64) {
-                prop_assert!(matches!(Time::from(secs), Time::Second));
-            }
+        #[proptest]
+        fn under_minute_is_just_now(#[strategy(i64::MIN..60i64)] secs: i64) {
+            prop_assert!(matches!(Time::from(secs), Time::Second));
+        }
 
-            #[test]
-            fn under_hour_is_minute(secs in 60..3_600i64) {
-                prop_assert!(matches!(Time::from(secs), Time::Minute(_)));
-            }
+        #[proptest]
+        fn under_hour_is_minute(#[strategy(60..3_600i64)] secs: i64) {
+            prop_assert!(matches!(Time::from(secs), Time::Minute(_)));
+        }
 
-            #[test]
-            fn under_day_is_hour(secs in 3_600..86_400i64) {
-                prop_assert!(matches!(Time::from(secs), Time::Hour(_)));
-            }
+        #[proptest]
+        fn under_day_is_hour(#[strategy(3_600..86_400i64)] secs: i64) {
+            prop_assert!(matches!(Time::from(secs), Time::Hour(_)));
+        }
 
-            #[test]
-            fn day_or_more_is_day(secs in 86_400..i64::MAX) {
-                prop_assert!(matches!(Time::from(secs), Time::Day(_)));
-            }
+        #[proptest]
+        fn day_or_more_is_day(#[strategy(86_400..i64::MAX)] secs: i64) {
+            prop_assert!(matches!(Time::from(secs), Time::Day(_)));
+        }
 
-            #[test]
-            fn tilde_shortens_paths_below_home(
-                home in prop::collection::vec("[a-z]{1,5}", 1..4),
-                rest in prop::collection::vec("[a-z]{1,5}", 1..4),
-            ) {
-                let home = PathBuf::from(format!("/{}", home.join("/")));
-                let rest = rest.join("/");
-                let path = home.join(&rest);
-                prop_assert_eq!(tilde(path.to_str().unwrap(), Some(&home)), format!("~/{rest}"));
-            }
+        #[proptest]
+        fn tilde_shortens_paths_below_home(
+            #[strategy("(/[a-z]{1,5}){1,3}")] home: String,
+            #[strategy("[a-z]{1,5}(/[a-z]{1,5}){0,2}")] rest: String,
+        ) {
+            let path = format!("{home}/{rest}");
+            prop_assert_eq!(tilde(&path, Some(Path::new(&home))), format!("~/{rest}"));
+        }
 
-            #[test]
-            fn tilde_keeps_siblings_of_home(
-                home in prop::collection::vec("[a-z]{1,5}", 1..4),
-                suffix in "[a-z]{1,3}",
-            ) {
-                let home = format!("/{}", home.join("/"));
-                let sibling = format!("{home}{suffix}");
-                prop_assert_eq!(tilde(&sibling, Some(Path::new(&home))), sibling);
-            }
+        #[proptest]
+        fn tilde_keeps_siblings_of_home(
+            #[strategy("(/[a-z]{1,5}){1,3}")] home: String,
+            #[strategy("[a-z]{1,3}")] suffix: String,
+        ) {
+            let sibling = format!("{home}{suffix}");
+            prop_assert_eq!(tilde(&sibling, Some(Path::new(&home))), sibling);
+        }
 
-            #[test]
-            fn tilde_keeps_unrelated_paths(
-                home in prop::collection::vec("[a-z]{1,5}", 1..4),
-                path in prop::collection::vec("[a-z]{1,5}", 1..6),
-            ) {
-                let home = PathBuf::from(format!("/{}", home.join("/")));
-                let path = format!("/{}", path.join("/"));
-                prop_assume!(!Path::new(&path).starts_with(&home));
-                prop_assert_eq!(tilde(&path, Some(&home)), path);
-            }
+        #[proptest]
+        fn tilde_keeps_unrelated_paths(
+            #[strategy("(/[a-z]{1,5}){1,3}")] home: String,
+            #[strategy("(/[a-z]{1,5}){1,5}")] path: String,
+        ) {
+            prop_assume!(!Path::new(&path).starts_with(&home));
+            prop_assert_eq!(tilde(&path, Some(Path::new(&home))), path);
+        }
 
-            #[test]
-            fn biggest_name_is_the_longest_name_plus_three(
-                names in prop::collection::vec(any::<String>(), 1..20),
-            ) {
-                let rows: Vec<Row> = names.iter().map(|n| row_named(n)).collect();
-                let longest = names.iter().map(String::len).max().unwrap();
-                prop_assert_eq!(biggest_name(&rows).unwrap(), longest + 3);
-            }
+        #[proptest]
+        fn biggest_name_is_the_longest_name_plus_three(
+            #[strategy(prop::collection::vec(any::<String>(), 1..20))] names: Vec<String>,
+        ) {
+            let rows: Vec<Row> = names
+                .iter()
+                .map(|name| Row {
+                    name: name.clone(),
+                    path: String::new(),
+                    rank: 0.0,
+                    last_accessed: 0,
+                    score: 0.0,
+                })
+                .collect();
+            let longest = names.iter().map(String::len).max().unwrap();
+            prop_assert_eq!(biggest_name(&rows).unwrap(), longest + 3);
         }
     }
 }

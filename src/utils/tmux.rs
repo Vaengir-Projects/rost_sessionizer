@@ -181,6 +181,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use std::fmt::Write;
+    use test_strategy::proptest;
 
     mod parse_session_name {
         use super::*;
@@ -192,13 +193,11 @@ mod tests {
             }
         }
 
-        proptest! {
-            #[test]
-            fn round_trip(name in "[^:.\\s]([^:.\n\r]{0,18}[^:.\\s])?") {
-                let output = format!("{name}\n");
-                let parsed = parse_session_name(&output).unwrap();
-                prop_assert_eq!(parsed.as_str(), name.as_str());
-            }
+        #[proptest]
+        fn round_trip(#[strategy("[^:.\\s]([^:.\n\r]{0,18}[^:.\\s])?")] name: String) {
+            let output = format!("{name}\n");
+            let parsed = parse_session_name(&output).unwrap();
+            prop_assert_eq!(parsed.as_str(), name.as_str());
         }
     }
 
@@ -223,24 +222,21 @@ mod tests {
             assert!(error.to_string().contains("'repo'"));
         }
 
-        proptest! {
-            #[test]
-            fn round_trip(
-                sessions in prop::collection::vec(("[^:.\n\r]{1,20}", "/[^\n\r]{0,30}"), 0..10),
-            ) {
-                let output: String = sessions
-                    .iter()
-                    .fold(String::new(), |mut output, (name, path)| {
-                        let _ = writeln!(output, "{name}:{path}");
-                        output
-                    });
-                let parsed = parse_sessions(&output).unwrap();
-                prop_assert_eq!(parsed.len(), sessions.len());
-                for (dir, (name, path)) in parsed.iter().zip(&sessions) {
-                    prop_assert_eq!(dir.name.as_str(), name.as_str());
-                    prop_assert_eq!(&dir.path, &PathBuf::from(path));
-                    prop_assert!(dir.has_session);
-                }
+        #[proptest]
+        fn round_trip(
+            #[strategy(prop::collection::vec(("[^:.\n\r]{1,20}", "/[^\n\r]{0,30}"), 0..10))]
+            sessions: Vec<(String, String)>,
+        ) {
+            let mut output = String::new();
+            for (name, path) in &sessions {
+                writeln!(output, "{name}:{path}").unwrap();
+            }
+            let parsed = parse_sessions(&output).unwrap();
+            prop_assert_eq!(parsed.len(), sessions.len());
+            for (dir, (name, path)) in parsed.iter().zip(&sessions) {
+                prop_assert_eq!(dir.name.as_str(), name.as_str());
+                prop_assert_eq!(&dir.path, &PathBuf::from(path));
+                prop_assert!(dir.has_session);
             }
         }
     }
@@ -257,17 +253,15 @@ mod tests {
             }
         }
 
-        proptest! {
-            #[test]
-            fn round_trip(width in any::<u16>(), height in any::<u16>()) {
-                let output = format!("{width}x{height}\n");
-                prop_assert_eq!(parse_terminal_size(&output).unwrap(), (width, height));
-            }
+        #[proptest]
+        fn round_trip(#[any] width: u16, #[any] height: u16) {
+            let output = format!("{width}x{height}\n");
+            prop_assert_eq!(parse_terminal_size(&output).unwrap(), (width, height));
+        }
 
-            #[test]
-            fn never_panics(output in any::<String>()) {
-                let _ = parse_terminal_size(&output);
-            }
+        #[proptest]
+        fn never_panics(#[any] output: String) {
+            let _ = parse_terminal_size(&output);
         }
     }
 }

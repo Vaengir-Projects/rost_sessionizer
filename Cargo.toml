@@ -19,3 +19,4 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 [dev-dependencies]
 proptest = "1.12.0"
 tempfile = "3.27.0"
+test-strategy = "0.4.5"

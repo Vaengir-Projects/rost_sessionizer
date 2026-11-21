@@ -255,8 +255,9 @@ mod tests {
         path::Path,
     };
     use tempfile::TempDir;
+    use test_strategy::{Arbitrary, proptest};
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, Arbitrary)]
     enum Kind {
         Plain,
         RepoDir,
@@ -267,10 +268,6 @@ mod tests {
         fn is_repo(self) -> bool {
             !matches!(self, Self::Plain)
         }
-    }
-
-    fn kind() -> impl Strategy<Value = Kind> {
-        prop_oneof![Just(Kind::Plain), Just(Kind::RepoDir), Just(Kind::RepoFile)]
     }
 
     fn create(path: &Path, kind: Kind) {
@@ -293,18 +290,6 @@ mod tests {
             .collect()
     }
 
-    fn names(dirs: &Dirs) -> BTreeSet<String> {
-        dirs.keys().map(ToString::to_string).collect()
-    }
-
-    fn names_where(entries: &BTreeMap<String, Kind>, keep: fn(Kind) -> bool) -> BTreeSet<String> {
-        entries
-            .iter()
-            .filter(|(_, kind)| keep(**kind))
-            .map(|(name, _)| name.clone())
-            .collect()
-    }
-
     mod directories_and_repos {
         use super::*;
 
@@ -320,11 +305,19 @@ mod tests {
             let paths = [plain, repo, worktree];
 
             assert_eq!(
-                names(&get_directories(&paths).unwrap()),
+                get_directories(&paths)
+                    .unwrap()
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
                 BTreeSet::from(["plain".to_owned()])
             );
             assert_eq!(
-                names(&get_repos(&paths).unwrap()),
+                get_repos(&paths)
+                    .unwrap()
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
                 BTreeSet::from(["repo".to_owned(), "worktree".to_owned()])
             );
         }
@@ -364,20 +357,39 @@ mod tests {
             assert!(get_directories(&[tmp.path().join("missing")]).is_err());
         }
 
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(32))]
-
-            #[test]
-            fn every_path_is_directory_or_repo(
-                entries in prop::collection::btree_map("[a-z]{1,8}", kind(), 0..8),
-            ) {
-                let tmp = TempDir::new().unwrap();
-                let paths = create_all(tmp.path(), &entries);
-                let directories = names(&get_directories(&paths).unwrap());
-                let repos = names(&get_repos(&paths).unwrap());
-                prop_assert_eq!(directories, names_where(&entries, |kind| !kind.is_repo()));
-                prop_assert_eq!(repos, names_where(&entries, Kind::is_repo));
-            }
+        #[proptest(cases = 32)]
+        fn every_path_is_directory_or_repo(
+            #[strategy(prop::collection::btree_map("[a-z]{1,8}", any::<Kind>(), 0..8))]
+            entries: BTreeMap<String, Kind>,
+        ) {
+            let tmp = TempDir::new().unwrap();
+            let paths = create_all(tmp.path(), &entries);
+            let plain: BTreeSet<String> = entries
+                .iter()
+                .filter(|(_, kind)| !kind.is_repo())
+                .map(|(name, _)| name.clone())
+                .collect();
+            let repos: BTreeSet<String> = entries
+                .iter()
+                .filter(|(_, kind)| kind.is_repo())
+                .map(|(name, _)| name.clone())
+                .collect();
+            prop_assert_eq!(
+                get_directories(&paths)
+                    .unwrap()
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
+                plain
+            );
+            prop_assert_eq!(
+                get_repos(&paths)
+                    .unwrap()
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
+                repos
+            );
         }
     }
 
@@ -396,7 +408,10 @@ mod tests {
 
             let found = get_worktrees(std::slice::from_ref(&project)).unwrap();
             assert_eq!(
-                names(&found),
+                found
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
                 BTreeSet::from([
                     "project".to_owned(),
                     "project/feature".to_owned(),
@@ -423,28 +438,33 @@ mod tests {
             assert!(found.contains_key(&SessionName::new("project")));
         }
 
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(32))]
+        #[proptest(cases = 32)]
+        fn children_with_dot_git(
+            #[any] root: Kind,
+            #[strategy(prop::collection::btree_map("[a-z]{1,8}", any::<Kind>(), 0..8))]
+            children: BTreeMap<String, Kind>,
+        ) {
+            let tmp = TempDir::new().unwrap();
+            let project = tmp.path().join("project");
+            create(&project, root);
+            create_all(&project, &children);
 
-            #[test]
-            fn children_with_dot_git(
-                root in kind(),
-                children in prop::collection::btree_map("[a-z]{1,8}", kind(), 0..8),
-            ) {
-                let tmp = TempDir::new().unwrap();
-                let project = tmp.path().join("project");
-                create(&project, root);
-                create_all(&project, &children);
-
-                let mut expected: BTreeSet<_> = names_where(&children, Kind::is_repo)
-                    .into_iter()
-                    .map(|name| format!("project/{name}"))
-                    .collect();
-                if matches!(root, Kind::RepoDir) {
-                    expected.insert("project".to_owned());
-                }
-                prop_assert_eq!(names(&get_worktrees(&[project]).unwrap()), expected);
+            let mut expected: BTreeSet<_> = children
+                .iter()
+                .filter(|(_, kind)| kind.is_repo())
+                .map(|(name, _)| format!("project/{name}"))
+                .collect();
+            if matches!(root, Kind::RepoDir) {
+                expected.insert("project".to_owned());
             }
+            prop_assert_eq!(
+                get_worktrees(&[project])
+                    .unwrap()
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
+                expected
+            );
         }
     }
 }

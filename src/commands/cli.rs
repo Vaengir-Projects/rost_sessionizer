@@ -166,18 +166,11 @@ mod tests {
     use super::*;
     use clap::{ArgMatches, error::ErrorKind};
     use proptest::prelude::*;
+    use test_strategy::proptest;
 
     fn parse(args: &[&str]) -> Result<ArgMatches, clap::Error> {
         build_cli()
             .try_get_matches_from(std::iter::once("rost_sessionizer").chain(args.iter().copied()))
-    }
-
-    fn error_kind(args: &[&str]) -> ErrorKind {
-        parse(args).unwrap_err().kind()
-    }
-
-    fn value_name<T: ValueEnum>(value: &T) -> String {
-        value.to_possible_value().unwrap().get_name().to_owned()
     }
 
     #[test]
@@ -188,7 +181,7 @@ mod tests {
     #[test]
     fn no_args_shows_help() {
         assert_eq!(
-            error_kind(&[]),
+            parse(&[]).unwrap_err().kind(),
             ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
         );
     }
@@ -207,15 +200,18 @@ mod tests {
         #[test]
         fn accepts_every_shell() {
             for shell in Shell::value_variants() {
-                let name = value_name(shell);
-                let matches = parse(&["-G", &name]).unwrap();
+                let value = shell.to_possible_value().unwrap();
+                let matches = parse(&["-G", value.get_name()]).unwrap();
                 assert_eq!(matches.get_one::<Shell>("generator"), Some(shell));
             }
         }
 
         #[test]
         fn rejects_unknown_shells() {
-            assert_eq!(error_kind(&["-G", "cmd"]), ErrorKind::InvalidValue);
+            assert_eq!(
+                parse(&["-G", "cmd"]).unwrap_err().kind(),
+                ErrorKind::InvalidValue
+            );
         }
     }
 
@@ -230,10 +226,6 @@ mod tests {
                 .unwrap()
                 .copied()
                 .collect()
-        }
-
-        fn search_mode_lists() -> impl Strategy<Value = Vec<SearchMode>> {
-            prop::collection::vec(prop::sample::select(SearchMode::value_variants()), 1..=4)
         }
 
         #[test]
@@ -263,7 +255,7 @@ mod tests {
         #[test]
         fn search_rejects_unknown_modes() {
             assert_eq!(
-                error_kind(&["open", "-s", "everything"]),
+                parse(&["open", "-s", "everything"]).unwrap_err().kind(),
                 ErrorKind::InvalidValue
             );
         }
@@ -277,42 +269,28 @@ mod tests {
             }
         }
 
-        proptest! {
-            #[test]
-            fn search_keeps_given_modes(modes in search_mode_lists()) {
-                let names: Vec<String> = modes.iter().map(value_name).collect();
-                let mut args = vec!["open", "-s"];
-                args.extend(names.iter().map(String::as_str));
-                prop_assert_eq!(search_modes(&args), modes);
-            }
+        #[proptest]
+        fn search_keeps_given_modes(
+            #[strategy(prop::collection::vec(prop::sample::select(SearchMode::value_variants()), 1..=4))]
+            modes: Vec<SearchMode>,
+        ) {
+            let names: Vec<String> = modes
+                .iter()
+                .map(|mode| mode.to_possible_value().unwrap().get_name().to_owned())
+                .collect();
+            let mut args = vec!["open", "-s"];
+            args.extend(names.iter().map(String::as_str));
+            prop_assert_eq!(search_modes(&args), modes);
         }
     }
 
     mod frecency {
         use super::*;
 
-        fn with_name(position: usize, name: &str) -> Vec<&str> {
-            match position {
-                0 => vec!["frecency", "new", name, "/tmp"],
-                1 => vec!["frecency", "add", name],
-                2 => vec!["frecency", "modify", name, "valid"],
-                3 => vec!["frecency", "modify", "valid", name],
-                _ => vec!["frecency", "remove", name],
-            }
-        }
-
-        fn valid_name() -> impl Strategy<Value = String> {
-            "[^.:\\s-][^.:]{0,10}"
-        }
-
-        fn invalid_name() -> impl Strategy<Value = String> {
-            "([^.:\\s-][^.:]{0,4})?[.:][^.:]{0,5}"
-        }
-
         #[test]
         fn requires_subcommand() {
             assert_eq!(
-                error_kind(&["frecency"]),
+                parse(&["frecency"]).unwrap_err().kind(),
                 ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
             );
         }
@@ -356,7 +334,7 @@ mod tests {
                 vec!["frecency", "remove"],
             ] {
                 assert_eq!(
-                    error_kind(&args),
+                    parse(&args).unwrap_err().kind(),
                     ErrorKind::MissingRequiredArgument,
                     "{args:?}"
                 );
@@ -366,23 +344,43 @@ mod tests {
         #[test]
         fn add_name_conflicts_with_worktree() {
             assert_eq!(
-                error_kind(&["frecency", "add", "api", "-w"]),
+                parse(&["frecency", "add", "api", "-w"]).unwrap_err().kind(),
                 ErrorKind::ArgumentConflict
             );
             assert!(parse(&["frecency", "add", "-w"]).is_ok());
             assert!(parse(&["frecency", "add"]).is_ok());
         }
 
-        proptest! {
-            #[test]
-            fn every_name_accepts_valid_names(position in 0..5usize, name in valid_name()) {
-                prop_assert!(parse(&with_name(position, &name)).is_ok());
+        #[proptest]
+        fn every_name_accepts_valid_names(#[strategy("[^.:\\s-][^.:]{0,10}")] name: String) {
+            for args in [
+                vec!["frecency", "new", &name, "/tmp"],
+                vec!["frecency", "add", &name],
+                vec!["frecency", "modify", &name, "valid"],
+                vec!["frecency", "modify", "valid", &name],
+                vec!["frecency", "remove", &name],
+            ] {
+                prop_assert!(parse(&args).is_ok(), "{args:?}");
             }
+        }
 
-            #[test]
-            fn every_name_rejects_separators(position in 0..5usize, name in invalid_name()) {
-                let kind = error_kind(&with_name(position, &name));
-                prop_assert_eq!(kind, ErrorKind::ValueValidation);
+        #[proptest]
+        fn every_name_rejects_separators(
+            #[strategy("([^.:\\s-][^.:]{0,4})?[.:][^.:]{0,5}")] name: String,
+        ) {
+            for args in [
+                vec!["frecency", "new", &name, "/tmp"],
+                vec!["frecency", "add", &name],
+                vec!["frecency", "modify", &name, "valid"],
+                vec!["frecency", "modify", "valid", &name],
+                vec!["frecency", "remove", &name],
+            ] {
+                prop_assert_eq!(
+                    parse(&args).unwrap_err().kind(),
+                    ErrorKind::ValueValidation,
+                    "{:?}",
+                    args
+                );
             }
         }
     }

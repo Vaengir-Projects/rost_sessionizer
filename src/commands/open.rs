@@ -380,4 +380,71 @@ mod tests {
             }
         }
     }
+
+    mod worktrees {
+        use super::*;
+
+        #[test]
+        fn bare_repository() {
+            let tmp = TempDir::new().unwrap();
+            let project = tmp.path().join("project");
+            create(&project, Kind::RepoDir);
+            create(&project.join("main"), Kind::RepoFile);
+            create(&project.join("feature"), Kind::RepoFile);
+            create(&project.join("notes"), Kind::Plain);
+            fs::write(project.join("readme"), "").unwrap();
+
+            let found = get_worktrees(std::slice::from_ref(&project)).unwrap();
+            assert_eq!(
+                names(&found),
+                BTreeSet::from([
+                    "project".to_owned(),
+                    "project/feature".to_owned(),
+                    "project/main".to_owned()
+                ])
+            );
+            assert_eq!(
+                found[&SessionName::new("project/main")].path,
+                project.join("main").canonicalize().unwrap()
+            );
+        }
+
+        #[test]
+        #[cfg(target_os = "linux")]
+        fn child_with_non_utf8_name_does_not_break() {
+            use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+            let tmp = TempDir::new().unwrap();
+            let project = tmp.path().join("project");
+            create(&project, Kind::RepoDir);
+            create(&project.join(OsStr::from_bytes(b"caf\xe9")), Kind::Plain);
+
+            let found = get_worktrees(&[project]).unwrap();
+            assert!(found.contains_key(&SessionName::new("project")));
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(32))]
+
+            #[test]
+            fn children_with_dot_git(
+                root in kind(),
+                children in prop::collection::btree_map("[a-z]{1,8}", kind(), 0..8),
+            ) {
+                let tmp = TempDir::new().unwrap();
+                let project = tmp.path().join("project");
+                create(&project, root);
+                create_all(&project, &children);
+
+                let mut expected: BTreeSet<_> = names_where(&children, Kind::is_repo)
+                    .into_iter()
+                    .map(|name| format!("project/{name}"))
+                    .collect();
+                if matches!(root, Kind::RepoDir) {
+                    expected.insert("project".to_owned());
+                }
+                prop_assert_eq!(names(&get_worktrees(&[project]).unwrap()), expected);
+            }
+        }
+    }
 }

@@ -8,6 +8,7 @@ repository = "https://github.com/Vaengir-Projects/rost_sessionizer.git"
 license = "MIT"
 keywords = ["tmux", "sessionizer"]
 categories = ["command-line-utilities"]
+rust-version = "1.87"
 
 [dependencies]
 anyhow = "1.0.98"

@@ -50,9 +50,14 @@ pub fn open(search_modes: ValuesRef<'_, SearchMode>) -> Result<()> {
 
     let mut warnings = Vec::new();
     if config::paths().is_empty() {
-        warnings.push(
-            "No paths configured: set SESSIONIZER_PATHS or paths in $XDG_CONFIG_HOME/rost_sessionizer/config.toml"
-            .to_owned());
+        let file = config::file_path().map_or_else(
+            |_| "the config file".to_owned(),
+            |path| path.display().to_string(),
+        );
+        warnings.push(format!(
+            "Configuration needed: set SESSIONIZER_PATHS or paths in {file}\n\
+            `rost_sessionizer config example` prints an example config file"
+        ));
     }
     let mut configured_dirs = Vec::new();
     for entry in config::paths() {

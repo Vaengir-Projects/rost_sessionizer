@@ -22,6 +22,13 @@ fn main() -> Result<()> {
         let mut cmd = build_cli();
         eprintln!("Generating completion file for {generator}...");
         print_completions(generator, &mut cmd);
+        println!("Generated bash completion script");
+        return Ok(());
+    }
+
+    if let Some(("config", _)) = args.subcommand() {
+        print!("{}", config::EXAMPLE_CONFIG_FILE);
+        return Ok(());
     }
 
     config::init().context("Error loading the configuration")?;
@@ -47,7 +54,6 @@ fn main() -> Result<()> {
             frecency::frecency(sub_matches)
                 .context("Error while managing the frecency database")?;
         }
-        None => println!("Generated bash completion script"),
         e => unreachable!("Should be unreachable!: {:?}", e),
     }
 

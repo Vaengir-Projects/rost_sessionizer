@@ -12,6 +12,20 @@ use std::{
 const DEFAULT_SESSION: &str = "Default";
 const DEFAULT_DEPTH: usize = 1;
 
+pub const EXAMPLE_CONFIG_FILE: &str = r##"# rost_sessionizer configuration
+# Remove the leading "# " of a setting to use it.
+# DEFAULT_SESSION, SESSIONIZER_PATHS and SESSIONIZER_DEPTH take precedence over this file.
+
+# Session that `startup` creates and `kill` switches to
+# default_session = "Default"
+
+# Folders to search, "~" stands for your home directory
+# paths = ["~/code", "~/work"]
+
+# How many folder levels below each path get searched, the search stops at repos
+# depth = 1
+"##;
+
 static CONFIG: OnceLock<Config> = OnceLock::new();
 static DEFAULT: LazyLock<Config> = LazyLock::new(Config::default);
 
@@ -66,7 +80,7 @@ impl Env {
 /// number.
 pub fn init() -> Result<()> {
     let home = dirs::home_dir().context("Couldn't determine the home directory")?;
-    let path = config_path(dirs::config_dir())?;
+    let path = file_path()?;
     let file = match fs::read_to_string(&path) {
         Ok(text) => parse(&text).with_context(|| format!("Error parsing {}", path.display()))?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => File::default(),
@@ -95,9 +109,9 @@ fn get() -> &'static Config {
     CONFIG.get().unwrap_or(&DEFAULT)
 }
 
-fn config_path(config_dir: Option<PathBuf>) -> Result<PathBuf> {
-    Ok(config_dir
-        .context("Config directory not set")?
+pub(crate) fn file_path() -> Result<PathBuf> {
+    Ok(dirs::config_dir()
+        .context("Couldn't determine the config directory")?
         .join("rost_sessionizer")
         .join("config.toml"))
 }
@@ -314,6 +328,32 @@ mod tests {
                 config.depth,
                 usize::from(env_depth.or(file_depth).unwrap_or(1))
             );
+        }
+    }
+
+    mod example {
+        use super::*;
+
+        #[test]
+        fn sets_nothing() {
+            assert_eq!(parse(EXAMPLE_CONFIG_FILE).unwrap(), File::default());
+        }
+
+        #[test]
+        fn every_setting_is_valid_when_uncommented() {
+            let uncommented = EXAMPLE_CONFIG_FILE
+                .lines()
+                .map(|line| {
+                    line.strip_prefix("# ")
+                        .filter(|rest| rest.contains(" = "))
+                        .unwrap_or(line)
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let file = parse(&uncommented).unwrap();
+            assert!(file.default_session.is_some());
+            assert!(file.paths.is_some());
+            assert!(file.depth.is_some());
         }
     }
 }

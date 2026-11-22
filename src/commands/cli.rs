@@ -84,7 +84,10 @@ pub fn build_cli() -> Command {
                             Arg::new("worktree")
                                 .short('w')
                                 .long("worktree")
-                                .help("Use the <parent_dir>/<current_dir> as the name for the new frecency database entry")
+                                .help(
+                                    "Use the <parent_dir>/<current_dir> as the name \
+                                    for the new frecency database entry",
+                                )
                                 .action(ArgAction::SetTrue)
                                 .conflicts_with("name"),
                         ),
@@ -125,6 +128,12 @@ pub fn build_cli() -> Command {
                         .visible_alias("l")
                         .about("List directories in frecency database"),
                 ),
+        )
+        .subcommand(
+            Command::new("config")
+                .about("Work with the configuration")
+                .arg_required_else_help(true)
+                .subcommand(Command::new("example").about("Print an example config file")),
         )
         .arg(
             Arg::new("generator")
@@ -382,6 +391,25 @@ mod tests {
                     args
                 );
             }
+        }
+    }
+
+    mod config {
+        use super::*;
+
+        #[test]
+        fn requires_subcommand() {
+            assert_eq!(
+                parse(&["config"]).unwrap_err().kind(),
+                ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            );
+        }
+
+        #[test]
+        fn example_is_subcommand() {
+            let matches = parse(&["config", "example"]).unwrap();
+            let config = matches.subcommand_matches("config").unwrap();
+            assert_eq!(config.subcommand_name(), Some("example"));
         }
     }
 }

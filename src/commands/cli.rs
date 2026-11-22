@@ -20,112 +20,12 @@ pub fn build_cli() -> Command {
             It is intended to work well with git worktrees.",
         )
         .arg_required_else_help(true)
-        .subcommand(
-            Command::new("open")
-                .about("Open a new or switch to an existing session in tmux")
-                .arg(
-                    Arg::new("search")
-                        .short('s')
-                        .long("search")
-                        .help("Configure what should be searchable from the given directories")
-                        .action(ArgAction::Set)
-                        .value_parser(value_parser!(SearchMode))
-                        .num_args(0..=4)
-                        .default_value("all"),
-                )
-                .arg(
-                    Arg::new("verbose")
-                        .short('v')
-                        .long("verbose")
-                        .help("Use verbose output")
-                        .action(ArgAction::SetTrue),
-                ),
-        )
+        .subcommand(open_command())
         .subcommand(Command::new("kill").about("Kill active session"))
         .subcommand(Command::new("kill-all").about("Kill all active sessions"))
         .subcommand(Command::new("startup").about("Start tmux with the default session"))
-        .subcommand(
-            Command::new("frecency")
-                .visible_alias("f")
-                .about("Work with the frecency data")
-                .arg_required_else_help(true)
-                .subcommand(
-                    Command::new("new")
-                        .visible_alias("n")
-                        .about("Add a new directory to the frecency database")
-                        .arg(
-                            Arg::new("name")
-                                .value_name("name")
-                                .help("Display name for frecency entry")
-                                .required(true)
-                                .value_parser(value_parser!(SessionName)),
-                        )
-                        .arg(
-                            Arg::new("path")
-                                .value_name("path")
-                                .help("Path of the frecency entry")
-                                .required(true)
-                                .value_parser(value_parser!(PathBuf))
-                                .value_hint(ValueHint::DirPath),
-                        ),
-                )
-                .subcommand(
-                    Command::new("add")
-                        .visible_alias("a")
-                        .about("Add the current directory to the frecency database")
-                        .arg(
-                            Arg::new("name")
-                                .value_name("name")
-                                .help("Display name for frecency database entry")
-                                .value_parser(value_parser!(SessionName))
-                                .conflicts_with("worktree"),
-                        )
-                        .arg(
-                            Arg::new("worktree")
-                                .short('w')
-                                .long("worktree")
-                                .help("Use the <parent_dir>/<current_dir> as the name for the new frecency database entry")
-                                .action(ArgAction::SetTrue)
-                                .conflicts_with("name"),
-                        ),
-                )
-                .subcommand(
-                    Command::new("modify")
-                        .visible_alias("mod")
-                        .about("Modify an entry from the frecency database")
-                        .arg(
-                            Arg::new("old_name")
-                                .value_name("old_name")
-                                .help("Name of frecency entry to change")
-                                .required(true)
-                                .value_parser(value_parser!(SessionName)),
-                        )
-                        .arg(
-                            Arg::new("new_name")
-                                .value_name("new_name")
-                                .help("Name the frecency entry should be changed to")
-                                .required(true)
-                                .value_parser(value_parser!(SessionName)),
-                        ),
-                )
-                .subcommand(
-                    Command::new("remove")
-                        .visible_alias("rm")
-                        .about("Remove an entry from the frecency database")
-                        .arg(
-                            Arg::new("name")
-                                .value_name("name")
-                                .help("Display name for frecency entry")
-                                .required(true)
-                                .value_parser(value_parser!(SessionName)),
-                        ),
-                )
-                .subcommand(
-                    Command::new("list")
-                        .visible_alias("l")
-                        .about("List directories in frecency database"),
-                ),
-        )
+        .subcommand(frecency_command())
+        .subcommand(config_command())
         .arg(
             Arg::new("generator")
                 .short('G')
@@ -133,6 +33,121 @@ pub fn build_cli() -> Command {
                 .action(ArgAction::Set)
                 .value_parser(value_parser!(Shell)),
         )
+}
+
+fn open_command() -> Command {
+    Command::new("open")
+        .about("Open a new or switch to an existing session in tmux")
+        .arg(
+            Arg::new("search")
+                .short('s')
+                .long("search")
+                .help("Configure what should be searchable from the given directories")
+                .action(ArgAction::Set)
+                .value_parser(value_parser!(SearchMode))
+                .num_args(0..=4)
+                .default_value("all"),
+        )
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Use verbose output")
+                .action(ArgAction::SetTrue),
+        )
+}
+
+fn frecency_command() -> Command {
+    Command::new("frecency")
+        .visible_alias("f")
+        .about("Work with the frecency data")
+        .arg_required_else_help(true)
+        .subcommand(
+            Command::new("new")
+                .visible_alias("n")
+                .about("Add a new directory to the frecency database")
+                .arg(
+                    Arg::new("name")
+                        .value_name("name")
+                        .help("Display name for frecency entry")
+                        .required(true)
+                        .value_parser(value_parser!(SessionName)),
+                )
+                .arg(
+                    Arg::new("path")
+                        .value_name("path")
+                        .help("Path of the frecency entry")
+                        .required(true)
+                        .value_parser(value_parser!(PathBuf))
+                        .value_hint(ValueHint::DirPath),
+                ),
+        )
+        .subcommand(
+            Command::new("add")
+                .visible_alias("a")
+                .about("Add the current directory to the frecency database")
+                .arg(
+                    Arg::new("name")
+                        .value_name("name")
+                        .help("Display name for frecency database entry")
+                        .value_parser(value_parser!(SessionName))
+                        .conflicts_with("worktree"),
+                )
+                .arg(
+                    Arg::new("worktree")
+                        .short('w')
+                        .long("worktree")
+                        .help(
+                            "Use the <parent_dir>/<current_dir> as the name \
+                            for the new frecency database entry",
+                        )
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("name"),
+                ),
+        )
+        .subcommand(
+            Command::new("modify")
+                .visible_alias("mod")
+                .about("Modify an entry from the frecency database")
+                .arg(
+                    Arg::new("old_name")
+                        .value_name("old_name")
+                        .help("Name of frecency entry to change")
+                        .required(true)
+                        .value_parser(value_parser!(SessionName)),
+                )
+                .arg(
+                    Arg::new("new_name")
+                        .value_name("new_name")
+                        .help("Name the frecency entry should be changed to")
+                        .required(true)
+                        .value_parser(value_parser!(SessionName)),
+                ),
+        )
+        .subcommand(
+            Command::new("remove")
+                .visible_alias("rm")
+                .about("Remove an entry from the frecency database")
+                .arg(
+                    Arg::new("name")
+                        .value_name("name")
+                        .help("Display name for frecency entry")
+                        .required(true)
+                        .value_parser(value_parser!(SessionName)),
+                ),
+        )
+        .subcommand(
+            Command::new("list")
+                .visible_alias("l")
+                .about("List directories in frecency database"),
+        )
+}
+
+fn config_command() -> Command {
+    Command::new("config")
+        .about("Work with the configuration")
+        .arg_required_else_help(true)
+        .subcommand(Command::new("example").about("Print an example config file"))
 }
 
 /// Function to create output for bash completion
@@ -382,6 +397,25 @@ mod tests {
                     args
                 );
             }
+        }
+    }
+
+    mod config {
+        use super::*;
+
+        #[test]
+        fn requires_subcommand() {
+            assert_eq!(
+                parse(&["config"]).unwrap_err().kind(),
+                ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            );
+        }
+
+        #[test]
+        fn example_is_subcommand() {
+            let matches = parse(&["config", "example"]).unwrap();
+            let config = matches.subcommand_matches("config").unwrap();
+            assert_eq!(config.subcommand_name(), Some("example"));
         }
     }
 }

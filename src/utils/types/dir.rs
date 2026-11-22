@@ -4,9 +4,10 @@
 //! Provides types and traits for the underlying data.
 
 use crate::{config, utils::types::session_name::SessionName};
+use anyhow::{Context, Result, bail};
 use std::{
     collections::{HashMap, hash_map::Entry},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 #[derive(Debug, Clone)]
@@ -25,6 +26,28 @@ impl Dir {
             rank: None,
             has_session: true,
         }
+    }
+
+    pub(crate) fn configured(entry: &Path) -> Result<Self> {
+        let check = || -> Result<Self> {
+            if entry.as_os_str().is_empty() {
+                bail!("empty entry");
+            }
+            let path = entry.canonicalize()?;
+            if !path.is_dir() {
+                bail!("not a directory");
+            }
+            let name = path
+                .file_name()
+                .context("has no name")?
+                .to_string_lossy()
+                .into_owned();
+            path.read_dir()?;
+
+            Ok(Self::from((SessionName::new(&name), path, None)))
+        };
+
+        check().with_context(|| format!("Can't use '{}'", entry.display()))
     }
 }
 
@@ -305,5 +328,62 @@ mod tests {
             sorted.into_iter().map(|d| d.name).collect::<Vec<_>>()
         };
         prop_assert_eq!(sorted_names(), sorted_names());
+    }
+
+    mod configured {
+        use super::*;
+        use std::fs;
+        use tempfile::TempDir;
+
+        #[test]
+        fn uses_canonical_path_and_sanitized_name() {
+            let tmp = TempDir::new().unwrap();
+            let target = tmp.path().join("symbols-outline.nvim");
+            fs::create_dir(&target).unwrap();
+            fs::create_dir(tmp.path().join("other")).unwrap();
+
+            let dir = Dir::configured(&tmp.path().join("other/../symbols-outline.nvim")).unwrap();
+            assert_eq!(dir.name, SessionName::new("symbols-outline_nvim"));
+            assert_eq!(dir.path, target.canonicalize().unwrap());
+            assert_eq!(dir.rank, None);
+            assert!(!dir.has_session);
+        }
+
+        #[test]
+        fn rejects_empty_entry() {
+            assert!(Dir::configured(Path::new("")).is_err());
+        }
+
+        #[test]
+        fn rejects_missing_path() {
+            let tmp = TempDir::new().unwrap();
+            let missing = tmp.path().join("missing");
+            let error = Dir::configured(&missing).unwrap_err();
+            assert!(format!("{error:#}").contains(&missing.display().to_string()));
+        }
+
+        #[test]
+        fn rejects_root() {
+            assert!(Dir::configured(Path::new("/")).is_err());
+        }
+
+        #[test]
+        fn rejects_file() {
+            let tmp = TempDir::new().unwrap();
+            let file = tmp.path().join("notes.txt");
+            fs::write(&file, "").unwrap();
+            assert!(Dir::configured(&file).is_err());
+        }
+
+        #[proptest(cases = 32)]
+        fn name_comes_from_last_component(#[strategy("[a-z][a-z.]{0,8}")] name: String) {
+            let tmp = TempDir::new().unwrap();
+            let path = tmp.path().join(&name);
+            fs::create_dir(&path).unwrap();
+
+            let dir = Dir::configured(&path).unwrap();
+            prop_assert_eq!(dir.name, SessionName::new(&name));
+            prop_assert_eq!(dir.path, path.canonicalize().unwrap());
+        }
     }
 }

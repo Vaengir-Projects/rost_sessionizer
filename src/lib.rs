@@ -7,7 +7,7 @@
 pub mod commands;
 
 /// Module that handles the configuration.
-pub(crate) mod config;
+pub mod config;
 
 /// Module that provides internally used functions.
 pub(crate) mod utils;
